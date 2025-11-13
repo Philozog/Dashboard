@@ -13,7 +13,10 @@ def update_prices():
     # Loop through each ticker and get live price
     for i, row in df.iterrows():
         last_updated_time = pd.to_datetime(row["last_updated"])
-        if (datetime.now() - last_updated_time).seconds < 900:
+        time_since_update=(datetime.now() - last_updated_time).total_seconds()
+        if row["current_price"] ==0:
+            pass
+        elif time_since_update < 900:
             continue  # Skip if updated within last 15 minutes
     
         ticker = row["ticker"]
@@ -23,7 +26,7 @@ def update_prices():
                 latest_price = data["Close"].iloc[-1]
                 df.loc[i, "current_price"] = round(latest_price,2)
                 df.loc[i, "last_updated"] = datetime.now()
-                df.loc[i,"market_value"]= round(df.loc[i,"shares"] * df.loc[i,"current_price"],2)
+                df.loc[i,"market_value"]= df.loc[i,"shares"] * df.loc[i,"current_price"]
                 print(f"✅ Updated {ticker}: {latest_price}")
         except Exception as e:
             print(f"⚠️ Could not update {ticker}: {e}")

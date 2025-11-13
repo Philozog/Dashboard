@@ -9,7 +9,7 @@ conn.close()
 
 
 
-
+'''''''''''
 import sqlite3
 
 conn = sqlite3.connect("portfolio.db")
@@ -20,3 +20,5 @@ cur.executemany("INSERT INTO portfolio (ticker, shares, avg_price, current_price
 ])
 conn.commit()
 conn.close()
+
+'''''''''''
