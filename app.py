@@ -7,6 +7,7 @@ from sqlalchemy import create_engine
 from updater import update_prices 
 import os
 import sqlite3
+import plotly.express as px
 engine = create_engine("sqlite:///portfolio.db")
 
 if not os.path.exists("portfolio.db"):
@@ -28,14 +29,49 @@ def load_data():
                     current_price REAL,
                     market_value REAL,
                     last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )
+                    Total_Market_Value REAL
+                    Total_Profit_Loss REAL)
             """)
             conn.commit()
             df = pd.DataFrame(columns=[
                 "id", "ticker", "shares", "avg_price",
-                "current_price", "market_value", "last_updated"
+                "current_price", "market_value", "last_updated","Total_Market_Value","Total_Profit_Loss"
             ])
         return df
+    
+
+
+def make_portfolio_chart(df):
+    fig = px.bar(
+    df,
+    x="ticker",y="market_value",
+    title="Portfolio Market Value Distribution",
+    text="market_value",
+    )
+    fig.update_traces(
+    marker_color="#4E79A7",
+    marker_line_color="black",
+    marker_line_width=1,
+    texttemplate="%{text:,.0f}",
+    textposition="outside",
+    )
+    fig.update_layout(
+    template="plotly_white",
+    title_font=dict(size=26, family="Arial", color="#333"),
+    xaxis_title="Ticker",
+    yaxis_title="Market Value ($)",
+    xaxis=dict(showgrid=False),
+    yaxis=dict(showgrid=True, gridcolor="#E5E5E5"),
+    plot_bgcolor="white",
+    paper_bgcolor="white",
+    height=500,
+    margin=dict(l=50, r=30, t=80, b=40),
+)
+
+    fig.update_yaxes(tickprefix="$", separatethousands=True)
+
+    return fig
+
 
 def modify_portfolio(action, ticker, shares=None, avg_price=None):
     conn = sqlite3.connect("portfolio.db")
@@ -50,7 +86,8 @@ def modify_portfolio(action, ticker, shares=None, avg_price=None):
                 # Update the existing ticker
                 df.loc[df["ticker"] == ticker, "shares"] = shares
                 df.loc[df["ticker"] == ticker, "avg_price"] = avg_price
-            
+                df.loc[df["ticker"] == ticker, "Total_Profit_Loss"] = (df.loc[df["ticker"] == ticker, "current_price"] - avg_price) * shares
+                df.loc[df["ticker"] == ticker, "Total_Market_Value"] =="---"
 
         elif action == "remove":
             if shares is not None:
@@ -119,6 +156,7 @@ app.layout = html.Div([
 
 @app.callback(
     Output("portfolio-table", "data"),
+    Output("value-chart", "figure"),
 
     [Input("add-btn", "n_clicks"),
      Input("remove-btn", "n_clicks"),
@@ -136,9 +174,14 @@ def modify_data(add_clicks, remove_clicks, n_intervals, ticker, shares, avg_pric
     print("\n=== CALLBACK TRIGGERED ===")
     print("Add:", add_clicks, "Remove:", remove_clicks)
     print("Triggered:", ctx.triggered)
+    df = load_data()
+    chart_fig=make_portfolio_chart(df)
 
     if not ctx.triggered:
-        raise PreventUpdate
+        df=load_data()
+        df["market_value"] = df["market_value"].apply(lambda x:f"{x:,.0f}")
+        return (df.to_dict("records"),chart_fig)
+        
 
     button_id = ctx.triggered[0]["prop_id"].split(".")[0]
     print("Button clicked:", button_id)
@@ -156,9 +199,11 @@ def modify_data(add_clicks, remove_clicks, n_intervals, ticker, shares, avg_pric
         update_prices()
        
     #Load and Format Data
-    df = load_data()
+    df=load_data()
     df["market_value"] = df["market_value"].apply(lambda x:f"{x:,.0f}")
-    return df.to_dict("records")
+
+    chart_fig=make_portfolio_chart(df)
+    return (df.to_dict("records"),chart_fig)
 
 if __name__ == "__main__":
-    app.run(debug=True,reloader=False)
+    app.run(debug=True)

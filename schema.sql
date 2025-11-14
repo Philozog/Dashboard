@@ -7,5 +7,7 @@ CREATE TABLE IF NOT EXISTS portfolio (
     avg_price REAL,
     current_price REAL,
     Market_Value REAL,
-    last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    Total_Market_Value REAL,
+    Total_Profit_Loss REAL
 );
