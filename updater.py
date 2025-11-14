@@ -27,6 +27,8 @@ def update_prices():
                 df.loc[i, "current_price"] = round(latest_price,2)
                 df.loc[i, "last_updated"] = datetime.now()
                 df.loc[i,"market_value"]= df.loc[i,"shares"] * df.loc[i,"current_price"]
+                df.loc[i,"Total_Profit_Loss"]=(df.loc[i,"current_price"] - df.loc[i,"avg_price"]) * df.loc[i,"shares"]
+                df.loc[i,"Total_Market_Value"]="---"
                 print(f"✅ Updated {ticker}: {latest_price}")
         except Exception as e:
             print(f"⚠️ Could not update {ticker}: {e}")

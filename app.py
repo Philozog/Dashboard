@@ -28,8 +28,8 @@ def load_data():
                     avg_price REAL,
                     current_price REAL,
                     market_value REAL,
-                    last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                    Total_Market_Value REAL
+                    last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    Total_Market_Value REAL,
                     Total_Profit_Loss REAL)
             """)
             conn.commit()
@@ -44,12 +44,12 @@ def load_data():
 def make_portfolio_chart(df):
     fig = px.bar(
     df,
-    x="ticker",y="market_value",
+    x="ticker",y="market_value_num",
     title="Portfolio Market Value Distribution",
-    text="market_value",
+    text="Total_Profit_Loss",
     )
     fig.update_traces(
-    marker_color="#4E79A7",
+    marker_color="#C084FC",
     marker_line_color="black",
     marker_line_width=1,
     texttemplate="%{text:,.0f}",
@@ -67,9 +67,7 @@ def make_portfolio_chart(df):
     height=500,
     margin=dict(l=50, r=30, t=80, b=40),
 )
-
     fig.update_yaxes(tickprefix="$", separatethousands=True)
-
     return fig
 
 
@@ -87,7 +85,7 @@ def modify_portfolio(action, ticker, shares=None, avg_price=None):
                 df.loc[df["ticker"] == ticker, "shares"] = shares
                 df.loc[df["ticker"] == ticker, "avg_price"] = avg_price
                 df.loc[df["ticker"] == ticker, "Total_Profit_Loss"] = (df.loc[df["ticker"] == ticker, "current_price"] - avg_price) * shares
-                df.loc[df["ticker"] == ticker, "Total_Market_Value"] =="---"
+                df.loc[df["ticker"] == ticker, "Total_Market_Value"] ="---"
 
         elif action == "remove":
             if shares is not None:
@@ -103,7 +101,9 @@ def modify_portfolio(action, ticker, shares=None, avg_price=None):
                     "avg_price": avg_price,
                     "current_price": 0,
                     "market_value": shares * avg_price ,
-                    "last_updated": pd.Timestamp.now()
+                    "last_updated": pd.Timestamp.now(),
+                    "Total_Profit_Loss": 0,
+                    "Total_Market_Value": "---"
                 }])
              df = pd.concat([df, new_row], ignore_index=True)
         else:
@@ -128,6 +128,7 @@ app.layout = html.Div([
         dcc.Input(id="ticker-input", type="text", placeholder="Ticker (e.g. AAPL)"),
         dcc.Input(id="shares-input", type="number", placeholder="Shares", min=1),
         dcc.Input(id="avgprice-input", type="number", placeholder="Average Price", min=0),
+       
         html.Button("Add Ticker", id="add-btn", n_clicks=0, style={"marginRight": "10px"}),
         html.Button("Remove Ticker", id="remove-btn", n_clicks=0)
     ], style={"marginBottom": "20px"}),
@@ -146,7 +147,7 @@ app.layout = html.Div([
     dcc.Interval(
         id="interval-component",
         interval=60 * 1000,  # 1 minute
-        n_intervals=1
+        n_intervals=0
     )
 ])
 
@@ -157,7 +158,6 @@ app.layout = html.Div([
 @app.callback(
     Output("portfolio-table", "data"),
     Output("value-chart", "figure"),
-
     [Input("add-btn", "n_clicks"),
      Input("remove-btn", "n_clicks"),
      Input("interval-component", "n_intervals")],
@@ -174,13 +174,17 @@ def modify_data(add_clicks, remove_clicks, n_intervals, ticker, shares, avg_pric
     print("\n=== CALLBACK TRIGGERED ===")
     print("Add:", add_clicks, "Remove:", remove_clicks)
     print("Triggered:", ctx.triggered)
-    df = load_data()
-    chart_fig=make_portfolio_chart(df)
+    # df = load_data()
+    # chart_fig=make_portfolio_chart(df)
 
     if not ctx.triggered:
-        df=load_data()
-        df["market_value"] = df["market_value"].apply(lambda x:f"{x:,.0f}")
-        return (df.to_dict("records"),chart_fig)
+        df = load_data()
+        df["market_value_num"] = pd.to_numeric(df["market_value"], errors="coerce").fillna(0)
+        df["market_value"] = df["market_value_num"].apply(lambda x: f"{x:,.0f}")
+        df["Total_Profit_Loss"] = df["Total_Profit_Loss"].apply(lambda x: f"{x:,.0f}")
+        chart_fig = make_portfolio_chart(df)
+        table_data = df.drop(columns=["market_value_num"], errors="ignore").to_dict("records")
+        return (table_data, chart_fig)
         
 
     button_id = ctx.triggered[0]["prop_id"].split(".")[0]
@@ -199,11 +203,14 @@ def modify_data(add_clicks, remove_clicks, n_intervals, ticker, shares, avg_pric
         update_prices()
        
     #Load and Format Data
-    df=load_data()
-    df["market_value"] = df["market_value"].apply(lambda x:f"{x:,.0f}")
+    df = load_data()
+    df["market_value_num"] = pd.to_numeric(df["market_value"], errors="coerce").fillna(0)
+    df["market_value"] = df["market_value_num"].apply(lambda x: f"{x:,.0f}")
+    df["profit_loss"] = df["Total_Profit_Loss"].apply(lambda x: f"{x:,.2f}")
 
-    chart_fig=make_portfolio_chart(df)
-    return (df.to_dict("records"),chart_fig)
+    chart_fig = make_portfolio_chart(df)
+    table_data = df.drop(columns=["market_value_num"], errors="ignore").to_dict("records")
+    return (table_data, chart_fig)
 
 if __name__ == "__main__":
     app.run(debug=True)
