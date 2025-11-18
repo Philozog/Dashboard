@@ -46,27 +46,24 @@ def make_portfolio_chart(df):
     df,
     x="ticker",y="market_value_num",
     title="Portfolio Market Value Distribution",
-    text="Total_Profit_Loss",
+    text="Total_Profit_Loss_num",
     )
     fig.update_traces(
-    marker_color="#C084FC",
-    marker_line_color="black",
-    marker_line_width=1,
-    texttemplate="%{text:,.0f}",
-    textposition="outside",
+    marker_color="#EA84FC",
+    textposition="none",
     )
+
     fig.update_layout(
-    template="plotly_white",
+    template="seaborn",
     title_font=dict(size=26, family="Arial", color="#333"),
     xaxis_title="Ticker",
     yaxis_title="Market Value ($)",
-    xaxis=dict(showgrid=False),
-    yaxis=dict(showgrid=True, gridcolor="#E5E5E5"),
-    plot_bgcolor="white",
+    yaxis=dict(showgrid=False, gridcolor="white", zeroline=False),
     paper_bgcolor="white",
     height=500,
-    margin=dict(l=50, r=30, t=80, b=40),
-)
+    margin=dict(l=50, r=30, t=80, b=40)
+    )
+
     fig.update_yaxes(tickprefix="$", separatethousands=True)
     return fig
 
@@ -76,7 +73,7 @@ def modify_portfolio(action, ticker, shares=None, avg_price=None):
     df = pd.read_sql("SELECT * FROM portfolio", conn)
     
 
-    ticker = ticker.upper()
+    ticker = ticker.strip().upper()
     
     if ticker in df["ticker"].values: # Make sure Ticker exists
 
@@ -95,17 +92,18 @@ def modify_portfolio(action, ticker, shares=None, avg_price=None):
     
     else: #Ticket not in portfolio        
         if action =="add":
-             new_row = pd.DataFrame([{
+             df.loc[len(df)]={
                     "ticker": ticker,
                     "shares": shares,
                     "avg_price": avg_price,
                     "current_price": 0,
                     "market_value": shares * avg_price ,
                     "last_updated": pd.Timestamp.now(),
-                    "Total_Profit_Loss": 0,
-                    "Total_Market_Value": "---"
-                }])
-             df = pd.concat([df, new_row], ignore_index=True)
+                    "Total_Market_Value": "---",
+                    "Total_Profit_Loss": 0
+                    
+                }
+             
         else:
             raise ValueError("Ticker not found in portfolio.")
 
@@ -127,7 +125,7 @@ app.layout = html.Div([
     html.Div([
         dcc.Input(id="ticker-input", type="text", placeholder="Ticker (e.g. AAPL)"),
         dcc.Input(id="shares-input", type="number", placeholder="Shares", min=1),
-        dcc.Input(id="avgprice-input", type="number", placeholder="Average Price", min=0),
+        dcc.Input(id="avgprice-input", type="number", placeholder="Price", min=0),
        
         html.Button("Add Ticker", id="add-btn", n_clicks=0, style={"marginRight": "10px"}),
         html.Button("Remove Ticker", id="remove-btn", n_clicks=0)
@@ -135,7 +133,7 @@ app.layout = html.Div([
 
     # === DATA TABLE ===
     dash_table.DataTable(
-        id="portfolio-table",
+        id="portfolio-table",hidden_columns=["id"],
         columns=[{"name": i, "id": i,"type":"text"} for i in load_data().columns],
         # data=load_data().to_dict("records")
         data=[]
@@ -148,7 +146,7 @@ app.layout = html.Div([
     dcc.Interval(
         id="interval-component",
         interval=60 * 1000,  # 1 minute
-        n_intervals=0
+        n_intervals=1
     )
 ])
 
@@ -176,52 +174,85 @@ def modify_data(add_clicks, remove_clicks, n_intervals, ticker, shares, avg_pric
     print("Add:", add_clicks, "Remove:", remove_clicks)
     print("Triggered:", ctx.triggered)
 
-    if ctx.triggered:
-        button_id = ctx.triggered[0]["prop_id"].split(".")[0]
-        print("Button clicked:", button_id)
+    # FIRST LOAD (no trigger)
+    if not ctx.triggered:
+        df = load_data()
+        df["market_value_num"] = pd.to_numeric(df["market_value"], errors="coerce").fillna(0)
+        df["Total_Profit_Loss_num"]=pd.to_numeric(df["Total_Profit_Loss"],errors="coerce").fillna(0)
+       
+        df["market_value"] = df["market_value_num"].apply(lambda x: f"{x:,.0f}")
+        df["Total_Profit_Loss"] = df["Total_Profit_Loss_num"].apply(lambda x: f"{x:,.0f}")
+    #CREATE TOTAL ROW
+        Last_row = pd.DataFrame([{
+            "id": "",
+            "ticker": "TOTAL",
+            "shares": "",
+            "avg_price": "",
+            "current_price": "",
+            "market_value": f"{df['market_value_num'].sum():,.0f}",
+            "last_updated": "",
+            "Total_Market_Value": "",
+            "Total_Profit_Loss": f"{df["Total_Profit_Loss_num"].sum():,.0f}",
+            
+        }])
 
-        if button_id == "add-btn" and ticker and shares is not None and avg_price is not None:
-            print("adding ticker...")
-            modify_portfolio("add", ticker, shares, avg_price)
+        df = pd.concat([df, Last_row], ignore_index=True)
+        df_chart = df[df["ticker"] != "TOTAL"]
+        chart_fig = make_portfolio_chart(df_chart)
+        table_data = df.drop(columns=["market_value_num","Total_Profit_Loss_num"], errors="ignore").to_dict("records")
+        return table_data, chart_fig
 
-        elif button_id == "remove-btn" and ticker:
-            print("Remove Ticker...")
-            modify_portfolio("remove", ticker, shares, avg_price)
+    # Normal callback trigger
+    button_id = ctx.triggered[0]["prop_id"].split(".")[0]
+    print("Button clicked:", button_id)
 
-        elif button_id == "interval-component":
-            update_prices()
+    if button_id == "add-btn" and ticker and shares is not None and avg_price is not None:
+        print("adding ticker...")
+        modify_portfolio("add", ticker, shares, avg_price)
 
-    # ---- Load data (initial or updated) ----
+    elif button_id == "remove-btn" and ticker:
+        print("Remove Ticker...")
+        modify_portfolio("remove", ticker, shares, avg_price)
+
+    elif button_id == "interval-component":
+        update_prices()
+
+    # ---- Load updated data ----
+  # Load data
     df = load_data()
 
-    # Convert numeric columns
+    # Convert numerics
     df["market_value_num"] = pd.to_numeric(df["market_value"], errors="coerce").fillna(0)
     df["current_price"] = pd.to_numeric(df["current_price"], errors="coerce").fillna(0)
-    df["Total_Profit_Loss"] = pd.to_numeric(df["Total_Profit_Loss"], errors="coerce").fillna(0)
+    df["Total_Profit_Loss_num"] = pd.to_numeric(df["Total_Profit_Loss"], errors="coerce").fillna(0)
 
-    # Pretty formatting for table
+    # Format for display
     df["market_value"] = df["market_value_num"].apply(lambda x: f"{x:,.0f}")
-    df["profit_loss"] = df["Total_Profit_Loss"].apply(lambda x: f"{x:,.2f}")
+    # df["profit_loss"] = df["Total_Profit_Loss"].apply(lambda x: f"{x:,.2f}")
+    df["Total_Profit_Loss"]= df["Total_Profit_Loss_num"].apply(lambda x: f"{x:,.2f}")
 
-    # ---- Build TOTAL row ----
+    # --- THE FIX: CREATE TOTAL WITH ALL COLUMNS ---
     Last_row = pd.DataFrame([{
-        "ticker": "TOTAL",
-        "current_price": df["current_price"].sum(),
-        "market_value_num": df["market_value_num"].sum(),
-        "market_value": f"{df['market_value_num'].sum():,.0f}",
-        "Total_Profit_Loss": df["Total_Profit_Loss"].sum(),
-        "profit_loss": f"{df['Total_Profit_Loss'].sum():,.2f}"
-    }])
+            "id": "",
+            "ticker": "TOTAL",
+            "shares": "",
+            "avg_price": "",
+            "current_price": "",
+            "market_value": f"{df['market_value_num'].sum():,.0f}",
+            "last_updated": "",
+            "Total_Market_Value": "",
+            "Total_Profit_Loss": f"{df["Total_Profit_Loss_num"].sum():,.0f}",
+            
+        }])
 
     df = pd.concat([df, Last_row], ignore_index=True)
 
-    # Chart excludes TOTAL
+        # Chart excluding total
     df_chart = df[df["ticker"] != "TOTAL"]
     chart_fig = make_portfolio_chart(df_chart)
 
-    # Table includes TOTAL
-    table_data = df.drop(columns=["market_value_num"], errors="ignore").to_dict("records")
-
+        # Table including total
+    table_data = df.to_dict("records")
     return table_data, chart_fig
 
 
