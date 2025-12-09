@@ -1,0 +1,257 @@
+from dash import dcc, html, dash_table
+import dash
+from dash.dependencies import Input, Output, State
+
+import pandas as pd
+import sqlite3
+import plotly.express as px
+import yfinance as yf
+
+from updater import update_prices
+
+
+
+
+
+DB_PATH = "portfolio.db"
+
+
+def load_data():
+    with sqlite3.connect(DB_PATH) as conn:
+        try:
+            df = pd.read_sql("SELECT * FROM portfolio", conn)
+        except Exception:
+            print("Table missing, creating schema automatically...")
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS portfolio (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    ticker TEXT,
+                    shares REAL,
+                    avg_price REAL,
+                    current_price REAL,
+                    market_value REAL,
+                    last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    Total_Market_Value REAL,
+                    Total_Profit_Loss REAL
+                )
+                """
+            )
+            conn.commit()
+            df = pd.DataFrame(
+                columns=[
+                    "id",
+                    "ticker",
+                    "shares",
+                    "avg_price",
+                    "current_price",
+                    "market_value",
+                    "last_updated",
+                    "Total_Market_Value",
+                    "Total_Profit_Loss",
+                ]
+            )
+    return df
+
+
+def make_portfolio_chart(df):
+    fig = px.bar(
+        df,
+        x="ticker",
+        y="market_value_num",
+        title="Portfolio Market Value Distribution",
+        text="Total_Profit_Loss_num",
+    )
+    fig.update_traces(
+        marker_color="#EA84FC",
+        textposition="none",
+    )
+
+    fig.update_layout(
+        template="seaborn",
+        title_font=dict(size=26, family="Arial", color="#333"),
+        xaxis_title="Ticker",
+        yaxis_title="Market Value ($)",
+        yaxis=dict(showgrid=False, gridcolor="white", zeroline=False),
+        paper_bgcolor="white",
+        height=250,
+        margin=dict(l=50, r=30, t=80, b=40),
+    )
+
+    fig.update_yaxes(tickprefix="$", separatethousands=True)
+    return fig
+
+
+def modify_portfolio(action, ticker, shares=None, avg_price=None):
+    if not ticker:
+        raise ValueError("Ticker is required.")
+
+    ticker = ticker.strip().upper()
+    if not ticker:
+        raise ValueError("Ticker is required.")
+
+    if action not in {"add", "remove"}:
+        raise ValueError("Invalid action supplied.")
+
+    def _to_float(value, default=0.0):
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return default
+
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.row_factory = sqlite3.Row
+        existing = conn.execute(
+            "SELECT * FROM portfolio WHERE ticker = ?", (ticker,)
+        ).fetchone()
+
+        if action == "add":
+            if shares is None or avg_price is None:
+                raise ValueError("Shares and average price are required to add a ticker.")
+
+            shares = float(shares)
+            avg_price = float(avg_price)
+            current_price = _to_float(existing["current_price"]) if existing else 0.0
+            price_basis = current_price if current_price else avg_price
+            market_value = price_basis * shares
+            total_profit_loss = (current_price - avg_price) * shares if current_price else 0.0
+            timestamp = pd.Timestamp.now().isoformat()
+
+            if existing:
+                conn.execute(
+                    """
+                    UPDATE portfolio
+                    SET shares = ?, avg_price = ?, market_value = ?, Total_Market_Value = ?,
+                        Total_Profit_Loss = ?, last_updated = ?
+                    WHERE ticker = ?
+                    """,
+                    (shares, avg_price, market_value, market_value, total_profit_loss, timestamp, ticker),
+                )
+            else:
+                conn.execute(
+                    """
+                    INSERT INTO portfolio (ticker, shares, avg_price, current_price, market_value,
+                                            last_updated, Total_Market_Value, Total_Profit_Loss)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (ticker, shares, avg_price, current_price, market_value, timestamp, market_value, total_profit_loss),
+                )
+
+        elif action == "remove":
+            if not existing:
+                raise ValueError("Ticker not found in portfolio.")
+            if shares is None:
+                raise ValueError("Shares are required when removing a ticker.")
+
+            current_shares = _to_float(existing["shares"])
+            new_shares = current_shares - float(shares)
+
+            if new_shares <= 0:
+                conn.execute("DELETE FROM portfolio WHERE ticker = ?", (ticker,))
+            else:
+                avg_price_existing = _to_float(existing["avg_price"])
+                current_price = _to_float(existing["current_price"])
+                price_basis = current_price if current_price else avg_price_existing
+                market_value = price_basis * new_shares
+                total_profit_loss = (
+                    (current_price - avg_price_existing) * new_shares if current_price else 0.0
+                )
+                timestamp = pd.Timestamp.now().isoformat()
+
+                conn.execute(
+                    """
+                    UPDATE portfolio
+                    SET shares = ?, market_value = ?, Total_Market_Value = ?, Total_Profit_Loss = ?,
+                        last_updated = ?
+                    WHERE ticker = ?
+                    """,
+                    (new_shares, market_value, market_value, total_profit_loss, timestamp, ticker),
+                )
+
+
+dash.register_page(__name__, path="/")
+layout = html.Div([
+    html.H1(" Joe Zoghzoghi Portfolio Dashboard", style={"textAlign": "center", "marginBottom": "20px", "color": "#EA84FC"}),
+    html.Div([
+        dcc.Input(id="ticker-input", type="text", placeholder="Ticker (e.g. AAPL)"),
+        dcc.Input(id="shares-input", type="number", placeholder="Shares", min=1),
+        dcc.Input(id="avgprice-input", type="number", placeholder="Price", min=0),
+        html.Button("Add Ticker", id="add-btn", n_clicks=0, style={"marginRight": "10px"}),
+        html.Button("Remove Ticker", id="remove-btn", n_clicks=0),
+    ], style={"marginBottom": "20px"}),
+    dash_table.DataTable(
+        id="portfolio-table",
+        hidden_columns=["id"],
+        columns=[{"name": i, "id": i, "type": "text"} for i in load_data().columns],
+        data=[],
+        style_data_conditional=[{"if": {"filter_query": "{ticker} = 'TOTAL'"},
+                                    "fontWeight": "bold",
+                                    "backgroundColor": "#f7f8fc"}],
+                                    
+    style_header={"backgroundColor":"#EA84FC","fontWeight": "bold","color":'blue'}
+
+    ),
+    dcc.Graph(id="value-chart"),
+    dcc.Interval(
+        id="interval-component",
+        interval=60 * 1000,
+        n_intervals=1,
+    )
+])
+
+
+@dash.callback(
+    Output("portfolio-table", "data"),
+    Output("value-chart", "figure"),
+    Input("add-btn", "n_clicks"),
+    Input("remove-btn", "n_clicks"),
+    Input("interval-component", "n_intervals"),
+    State("ticker-input", "value"),
+    State("shares-input", "value"),
+    State("avgprice-input", "value"),
+)
+def modify_data(add_clicks, remove_clicks, n_intervals, ticker, shares, avg_price):
+    from dash import callback_context
+
+    ctx = callback_context
+    print("\n=== CALLBACK TRIGGERED ===")
+    print("Add:", add_clicks, "Remove:", remove_clicks)
+    print("Triggered:", ctx.triggered)
+
+   
+    
+    button_id = ctx.triggered[0]["prop_id"].split(".")[0] if ctx.triggered else "inital load"
+    print("Button clicked:", button_id)
+
+    if button_id == "add-btn" and ticker and shares is not None and avg_price is not None:
+        print("adding ticker...")
+        modify_portfolio("add", ticker, shares, avg_price)
+        
+    elif button_id == "remove-btn" and ticker:
+        print("remove ticker...")
+        modify_portfolio("remove", ticker, shares, avg_price)
+    elif button_id == "interval-component":
+        update_prices()
+
+    df = load_data()
+    df["market_value_num"] = pd.to_numeric(df["market_value"], errors="coerce").fillna(0)
+    df["current_price"] = pd.to_numeric(df["current_price"], errors="coerce").fillna(0)
+    df["Total_Profit_Loss_num"] = pd.to_numeric(df["Total_Profit_Loss"], errors="coerce").fillna(0)
+    df["market_value"] = df["market_value_num"].apply(lambda x: f"{x:,.0f}")
+    df["Total_Profit_Loss"] = df["Total_Profit_Loss_num"].apply(lambda x: f"{x:,.2f}")
+    last_row = pd.DataFrame([{
+        "id": "",
+        "ticker": "TOTAL",
+        "shares": "",
+        "avg_price": "",
+        "current_price": "",
+        "market_value": f"{df['market_value_num'].sum():,.0f}",
+        "last_updated": "",
+        "Total_Market_Value": "",
+        "Total_Profit_Loss": f"{df['Total_Profit_Loss_num'].sum():,.0f}",
+    }])
+    df = pd.concat([df, last_row], ignore_index=True)
+    df_chart = df[df["ticker"] != "TOTAL"]
+    chart_fig = make_portfolio_chart(df_chart)
+    table_data = df.to_dict("records")
+    return table_data, chart_fig
