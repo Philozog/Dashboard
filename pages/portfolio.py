@@ -54,6 +54,15 @@ def load_data():
     return df
 
 
+def make_big_pie(df):
+    fig=px.pie(df,values="market_value_num",names="ticker",title="Portfolio Market Value Distribution",color_discrete_sequence=px.colors.sequential.Purples_r)
+    fig.update_traces(textposition='inside', textinfo='percent+label')
+    fig.update_layout(title={"text":"Portfolio Market Value Distribution","x":0.5,"xanchor":"center","y":0.95})
+    return fig
+
+
+
+
 def make_portfolio_chart(df):
     fig = px.bar(
         df,
@@ -63,7 +72,7 @@ def make_portfolio_chart(df):
         text="Total_Profit_Loss_num",
     )
     fig.update_traces(
-        marker_color="#EA84FC",
+        marker_color="#B884FC",
         textposition="none",
     )
 
@@ -188,7 +197,7 @@ layout = html.Div([
                                     "fontWeight": "bold",
                                     "backgroundColor": "#f7f8fc"}],
                                     
-    style_header={"backgroundColor":"#EA84FC","fontWeight": "bold","color":'blue'}
+    style_header={"backgroundColor":"#EA84FC","fontWeight": "bold","color":'black'}
 
     ),
     dcc.Graph(id="value-chart"),
@@ -252,6 +261,6 @@ def modify_data(add_clicks, remove_clicks, n_intervals, ticker, shares, avg_pric
     }])
     df = pd.concat([df, last_row], ignore_index=True)
     df_chart = df[df["ticker"] != "TOTAL"]
-    chart_fig = make_portfolio_chart(df_chart)
+    chart_fig = make_big_pie(df_chart)
     table_data = df.to_dict("records")
     return table_data, chart_fig
