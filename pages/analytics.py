@@ -1,7 +1,7 @@
 
 import dash
 from dash import html
-from updater import update_prices
+from pages.updater import update_prices
 dash.register_page(__name__, path="/analytics")
 
 layout = html.Div(

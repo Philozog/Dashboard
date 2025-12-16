@@ -7,9 +7,7 @@ import sqlite3
 import plotly.express as px
 import yfinance as yf
 
-from updater import update_prices
-
-
+from pages.updater import update_prices
 
 
 
@@ -187,7 +185,9 @@ layout = html.Div([
         dcc.Input(id="avgprice-input", type="number", placeholder="Price", min=0),
         html.Button("Add Ticker", id="add-btn", n_clicks=0, style={"marginRight": "10px"}),
         html.Button("Remove Ticker", id="remove-btn", n_clicks=0),
-    ], style={"marginBottom": "20px"}),
+    ], style={"marginBottom":"20px"}),
+        html.Div(id="error-message", style={"color": "red"," marginBottom": "20px", "textAlign": "center"}),
+
     dash_table.DataTable(
         id="portfolio-table",
         hidden_columns=["id"],
@@ -204,7 +204,7 @@ layout = html.Div([
     dcc.Interval(
         id="interval-component",
         interval=60 * 1000,
-        n_intervals=1,
+        n_intervals=5,
     )
 ])
 
@@ -212,6 +212,7 @@ layout = html.Div([
 @dash.callback(
     Output("portfolio-table", "data"),
     Output("value-chart", "figure"),
+    Output("error-message", "children"),
     Input("add-btn", "n_clicks"),
     Input("remove-btn", "n_clicks"),
     Input("interval-component", "n_intervals"),
@@ -256,7 +257,7 @@ def modify_data(add_clicks, remove_clicks, n_intervals, ticker, shares, avg_pric
         "current_price": "",
         "market_value": f"{df['market_value_num'].sum():,.0f}",
         "last_updated": "",
-        "Total_Market_Value": "",
+        # "Total_Market_Value": "",
         "Total_Profit_Loss": f"{df['Total_Profit_Loss_num'].sum():,.0f}",
     }])
     df = pd.concat([df, last_row], ignore_index=True)

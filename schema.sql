@@ -2,7 +2,7 @@
 
 CREATE TABLE IF NOT EXISTS portfolio (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    ticker TEXT,
+    ticker TEXT UNIQUE,
     shares REAL,
     avg_price REAL,
     current_price REAL,

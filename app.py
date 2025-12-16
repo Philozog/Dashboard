@@ -4,7 +4,7 @@ from dash.exceptions import PreventUpdate
 
 import pandas as pd
 from sqlalchemy import create_engine
-from updater import update_prices 
+from pages.updater import update_prices 
 import os
 import sqlite3
 import plotly.express as px
