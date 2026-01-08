@@ -1,14 +1,6 @@
-from dash import Dash, dcc, html, dash_table
-from dash.dependencies import Input, Output, State
-from dash.exceptions import PreventUpdate
-
-import pandas as pd
-from sqlalchemy import create_engine
-from pages.updater import update_prices 
+from dash import Dash, html
+import dash
 import os
-import sqlite3
-import plotly.express as px
-import dash 
 engine = create_engine("sqlite:///portfolio.db")
 
 if not os.path.exists("portfolio.db"):

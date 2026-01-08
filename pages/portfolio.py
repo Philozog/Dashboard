@@ -7,49 +7,14 @@ import sqlite3
 import plotly.express as px
 import yfinance as yf
 
-from pages.updater import update_prices
+from Services.updater import update_prices
+from Services.helper import load_data
 
 
 
 DB_PATH = "portfolio.db"
 
 
-def load_data():
-    with sqlite3.connect(DB_PATH) as conn:
-        try:
-            df = pd.read_sql("SELECT * FROM portfolio", conn)
-        except Exception:
-            print("Table missing, creating schema automatically...")
-            conn.execute(
-                """
-                CREATE TABLE IF NOT EXISTS portfolio (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    ticker TEXT,
-                    shares REAL,
-                    avg_price REAL,
-                    current_price REAL,
-                    market_value REAL,
-                    last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    Total_Market_Value REAL,
-                    Total_Profit_Loss REAL
-                )
-                """
-            )
-            conn.commit()
-            df = pd.DataFrame(
-                columns=[
-                    "id",
-                    "ticker",
-                    "shares",
-                    "avg_price",
-                    "current_price",
-                    "market_value",
-                    "last_updated",
-                    "Total_Market_Value",
-                    "Total_Profit_Loss",
-                ]
-            )
-    return df
 
 
 def make_big_pie(df):
@@ -184,9 +149,7 @@ layout = html.Div([
         dcc.Input(id="shares-input", type="number", placeholder="Shares", min=1),
         dcc.Input(id="avgprice-input", type="number", placeholder="Price", min=0),
         html.Button("Add Ticker", id="add-btn", n_clicks=0, style={"marginRight": "10px"}),
-        html.Button("Remove Ticker", id="remove-btn", n_clicks=0),
-    ], style={"marginBottom":"20px"}),
-        html.Div(id="error-message", style={"color": "red"," marginBottom": "20px", "textAlign": "center"}),
+        html.Button("Remove Ticker", id="remove-btn", n_clicks=0)]),
 
     dash_table.DataTable(
         id="portfolio-table",
@@ -212,7 +175,6 @@ layout = html.Div([
 @dash.callback(
     Output("portfolio-table", "data"),
     Output("value-chart", "figure"),
-    Output("error-message", "children"),
     Input("add-btn", "n_clicks"),
     Input("remove-btn", "n_clicks"),
     Input("interval-component", "n_intervals"),
