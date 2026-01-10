@@ -93,20 +93,20 @@ def modify_portfolio(action, ticker, shares=None, avg_price=None):
                 conn.execute(
                     """
                     UPDATE portfolio
-                    SET shares = ?, avg_price = ?, market_value = ?, Total_Market_Value = ?,
+                    SET shares = ?, avg_price = ?, market_value = ?,
                         Total_Profit_Loss = ?, last_updated = ?
                     WHERE ticker = ?
                     """,
-                    (shares, avg_price, market_value, market_value, total_profit_loss, timestamp, ticker),
+                    (shares, avg_price, market_value,total_profit_loss, timestamp, ticker),
                 )
             else:
                 conn.execute(
                     """
                     INSERT INTO portfolio (ticker, shares, avg_price, current_price, market_value,
-                                            last_updated, Total_Market_Value, Total_Profit_Loss)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                                            last_updated, Total_Profit_Loss)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
                     """,
-                    (ticker, shares, avg_price, current_price, market_value, timestamp, market_value, total_profit_loss),
+                    (ticker, shares, avg_price, current_price, market_value, timestamp, total_profit_loss),
                 )
 
         elif action == "remove":
@@ -133,11 +133,11 @@ def modify_portfolio(action, ticker, shares=None, avg_price=None):
                 conn.execute(
                     """
                     UPDATE portfolio
-                    SET shares = ?, market_value = ?, Total_Market_Value = ?, Total_Profit_Loss = ?,
+                    SET shares = ?, market_value = ?, Total_Profit_Loss = ?,
                         last_updated = ?
                     WHERE ticker = ?
                     """,
-                    (new_shares, market_value, market_value, total_profit_loss, timestamp, ticker),
+                    (new_shares, market_value, total_profit_loss, timestamp, ticker),
                 )
 
 
@@ -219,9 +219,9 @@ def modify_data(add_clicks, remove_clicks, n_intervals, ticker, shares, avg_pric
         "current_price": "",
         "market_value": f"{df['market_value_num'].sum():,.0f}",
         "last_updated": "",
-        # "Total_Market_Value": "",
         "Total_Profit_Loss": f"{df['Total_Profit_Loss_num'].sum():,.0f}",
     }])
+    df= df[df["ticker"] != "TOTAL"]
     df = pd.concat([df, last_row], ignore_index=True)
     df_chart = df[df["ticker"] != "TOTAL"]
     chart_fig = make_big_pie(df_chart)

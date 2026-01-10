@@ -6,8 +6,9 @@ CREATE TABLE IF NOT EXISTS portfolio (
     shares REAL,
     avg_price REAL,
     current_price REAL,
-    Market_Value REAL,
+    market_value REAL,
     last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    Total_Market_Value REAL,
     Total_Profit_Loss REAL
 );
+
+

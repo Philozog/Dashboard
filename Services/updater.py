@@ -2,6 +2,8 @@ import yfinance as yf
 import pandas as pd
 from sqlalchemy import create_engine
 from datetime import datetime
+
+
 # DATA from YAHOO FINANCE
 # Connect to your existing database
 # KEEP Dashboard Current and LIVE
@@ -34,7 +36,7 @@ def update_prices():
             print(f"⚠️ Could not update {ticker}: {e}")
 
     # Overwrite portfolio table with new prices
-    df.to_sql("portfolio", engine, if_exists="replace", index=False)
+    # df.to_sql("portfolio", engine, if_exists="replace", index=False)
 
 if __name__ == "__main__":
     print("🔄 Fetching new prices from Yahoo Finance...")

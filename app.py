@@ -1,6 +1,7 @@
 from dash import Dash, html
 import dash
 import os
+from sqlalchemy import create_engine
 engine = create_engine("sqlite:///portfolio.db")
 
 if not os.path.exists("portfolio.db"):

@@ -2,6 +2,8 @@ import sqlite3
 import pandas as pd
 
 
+DB_PATH = "portfolio.db"
+
 def load_data():
     with sqlite3.connect(DB_PATH) as conn:
         try:
@@ -18,7 +20,6 @@ def load_data():
                     current_price REAL,
                     market_value REAL,
                     last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    Total_Market_Value REAL,
                     Total_Profit_Loss REAL
                 )
                 """
@@ -37,4 +38,5 @@ def load_data():
                     "Total_Profit_Loss",
                 ]
             )
+    df=df.drop(columns=["Total_Market_Value"],errors='ignore')
     return df
