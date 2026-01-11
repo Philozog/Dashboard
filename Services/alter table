@@ -1,0 +1,6 @@
+import sqlite3
+
+conn = sqlite3.connect("portfolio.db")
+conn.execute("ALTER TABLE portfolio ADD COLUMN holding_type TEXT;")
+conn.commit()
+conn.close()

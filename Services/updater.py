@@ -16,10 +16,8 @@ def update_prices():
     for i, row in df.iterrows():
         last_updated_time = pd.to_datetime(row["last_updated"])
         time_since_update=(datetime.now() - last_updated_time).total_seconds()
-        if row["current_price"] ==0:
-            pass
-        elif time_since_update < 900:
-            continue  # Skip if updated within last 15 minutes
+        if row["current_price"] != 0 and time_since_update < 900:
+            continue
     
         ticker = row["ticker"]
         try:
@@ -35,8 +33,7 @@ def update_prices():
         except Exception as e:
             print(f"⚠️ Could not update {ticker}: {e}")
 
-    # Overwrite portfolio table with new prices
-    # df.to_sql("portfolio", engine, if_exists="replace", index=False)
+    
 
 if __name__ == "__main__":
     print("🔄 Fetching new prices from Yahoo Finance...")

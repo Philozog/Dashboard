@@ -27,34 +27,59 @@ def make_big_pie(df):
 
 
 def make_portfolio_chart(df):
-    fig = px.bar(
-        df,
-        x="ticker",
-        y="market_value_num",
-        title="Portfolio Market Value Distribution",
-        text="Total_Profit_Loss_num",
-    )
-    fig.update_traces(
-        marker_color="#B884FC",
-        textposition="none",
-    )
+        fig = px.bar(
+            df,
+            x="ticker",
+            y="market_value_num",
+            title="Portfolio Market Value Distribution",
+            text="Total_Profit_Loss_num",
+        )
+        fig.update_traces(
+            marker_color="#B884FC",
+            textposition="none",
+        )
 
-    fig.update_layout(
-        template="seaborn",
-        title_font=dict(size=26, family="Arial", color="#333"),
-        xaxis_title="Ticker",
-        yaxis_title="Market Value ($)",
-        yaxis=dict(showgrid=False, gridcolor="white", zeroline=False),
-        paper_bgcolor="white",
-        height=250,
-        margin=dict(l=50, r=30, t=80, b=40),
-    )
+        fig.update_layout(
+            template="seaborn",
+            title_font=dict(size=26, family="Arial", color="#333"),
+            xaxis_title="Ticker",
+            yaxis_title="Market Value ($)",
+            yaxis=dict(showgrid=False, gridcolor="white", zeroline=False),
+            paper_bgcolor="white",
+            height=250,
+            margin=dict(l=50, r=30, t=80, b=40),
+        )
 
-    fig.update_yaxes(tickprefix="$", separatethousands=True)
-    return fig
+        fig.update_yaxes(tickprefix="$", separatethousands=True)
+        return fig
 
 
-def modify_portfolio(action, ticker, shares=None, avg_price=None):
+def make_holding_type_chart(df):
+        grouped = (
+            df.groupby("holding_type", as_index=False)["market_value_num"]
+            .sum()
+        )
+        total = grouped["market_value_num"].sum()
+        grouped["percentage"] = grouped["market_value_num"] / total * 100
+        fig = px.bar(
+            grouped,
+            x="holding_type",
+            y="percentage",
+            title="Portfolio Allocation by Holding Type",
+            color="holding_type",
+            color_discrete_map={
+                "Core": "#4CAF50",
+                "High Conviction": "#FFC107",
+                "Moonshot": "#F44336",
+            },
+        )
+        fig.update_yaxes(range=[0, 100], ticksuffix="%")
+
+        fig.update_yaxes(ticksuffix="%", separatethousands=True)
+        return fig
+
+
+def modify_portfolio(action, ticker, shares=None, avg_price=None, holding_type=None):
     if not ticker:
         raise ValueError("Ticker is required.")
 
@@ -78,8 +103,8 @@ def modify_portfolio(action, ticker, shares=None, avg_price=None):
         ).fetchone()
 
         if action == "add":
-            if shares is None or avg_price is None:
-                raise ValueError("Shares and average price are required to add a ticker.")
+            if shares is None or avg_price is None or holding_type is None:
+                raise ValueError("Shares, average price, and holding type are required to add a ticker.")
 
             shares = float(shares)
             avg_price = float(avg_price)
@@ -94,20 +119,30 @@ def modify_portfolio(action, ticker, shares=None, avg_price=None):
                     """
                     UPDATE portfolio
                     SET shares = ?, avg_price = ?, market_value = ?,
-                        Total_Profit_Loss = ?, last_updated = ?
+                        Total_Profit_Loss = ?, last_updated = ?, holding_type=?
                     WHERE ticker = ?
                     """,
-                    (shares, avg_price, market_value,total_profit_loss, timestamp, ticker),
+                    (shares, avg_price, market_value,total_profit_loss, timestamp, holding_type, ticker),
                 )
             else:
                 conn.execute(
                     """
-                    INSERT INTO portfolio (ticker, shares, avg_price, current_price, market_value,
-                                            last_updated, Total_Profit_Loss)
-                    VALUES (?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    (ticker, shares, avg_price, current_price, market_value, timestamp, total_profit_loss),
-                )
+                    INSERT INTO portfolio (ticker, shares, avg_price, current_price,
+                    market_value, Total_Profit_Loss, holding_type, last_updated
+                                        )
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                                                    """,
+                        (
+                            ticker,
+                            shares,
+                            avg_price,
+                            current_price,
+                            market_value,
+                            total_profit_loss,
+                            holding_type,
+                            timestamp,
+                        ),
+                    )
 
         elif action == "remove":
             if not existing:
@@ -133,12 +168,17 @@ def modify_portfolio(action, ticker, shares=None, avg_price=None):
                 conn.execute(
                     """
                     UPDATE portfolio
-                    SET shares = ?, market_value = ?, Total_Profit_Loss = ?,
-                        last_updated = ?
-                    WHERE ticker = ?
-                    """,
-                    (new_shares, market_value, total_profit_loss, timestamp, ticker),
-                )
+                    SET shares = ?, market_value = ?, Total_Profit_Loss = ?, last_updated = ?
+                WHERE ticker = ?
+                                """,
+                        (
+                            new_shares,
+                            market_value,
+                            total_profit_loss,
+                            timestamp,
+                            ticker,
+                        ),
+                                        )
 
 
 dash.register_page(__name__, path="/")
@@ -150,6 +190,21 @@ layout = html.Div([
         dcc.Input(id="avgprice-input", type="number", placeholder="Price", min=0),
         html.Button("Add Ticker", id="add-btn", n_clicks=0, style={"marginRight": "10px"}),
         html.Button("Remove Ticker", id="remove-btn", n_clicks=0)]),
+        
+        #drop down for categorisation
+        dcc.Dropdown(
+        id="holding-type-input",
+        options=[
+            {"label": "Core Holding", "value": "Core"},
+            {"label": "High Conviction", "value": "High Conviction"},
+            {"label": "Moonshot", "value": "Moonshot"},
+        ],
+        placeholder="Holding type",
+        clearable=False,
+        style={"width": "200px", "marginRight": "10px"}
+    ),
+
+
 
     dash_table.DataTable(
         id="portfolio-table",
@@ -164,6 +219,7 @@ layout = html.Div([
 
     ),
     dcc.Graph(id="value-chart"),
+    dcc.Graph(id="holding-type-chart"),
     dcc.Interval(
         id="interval-component",
         interval=60 * 1000,
@@ -175,14 +231,17 @@ layout = html.Div([
 @dash.callback(
     Output("portfolio-table", "data"),
     Output("value-chart", "figure"),
+    Output("holding-type-chart", "figure"),
     Input("add-btn", "n_clicks"),
     Input("remove-btn", "n_clicks"),
     Input("interval-component", "n_intervals"),
     State("ticker-input", "value"),
     State("shares-input", "value"),
     State("avgprice-input", "value"),
+    State("holding-type-input", "value"),
+
 )
-def modify_data(add_clicks, remove_clicks, n_intervals, ticker, shares, avg_price):
+def modify_data(add_clicks, remove_clicks, n_intervals, ticker, shares, avg_price, holding_type):
     from dash import callback_context
 
     ctx = callback_context
@@ -195,13 +254,13 @@ def modify_data(add_clicks, remove_clicks, n_intervals, ticker, shares, avg_pric
     button_id = ctx.triggered[0]["prop_id"].split(".")[0] if ctx.triggered else "inital load"
     print("Button clicked:", button_id)
 
-    if button_id == "add-btn" and ticker and shares is not None and avg_price is not None:
+    if button_id == "add-btn" and ticker and shares is not None and avg_price is not None and holding_type is not None:
         print("adding ticker...")
-        modify_portfolio("add", ticker, shares, avg_price)
+        modify_portfolio("add", ticker, shares, avg_price,holding_type)
         
     elif button_id == "remove-btn" and ticker:
         print("remove ticker...")
-        modify_portfolio("remove", ticker, shares, avg_price)
+        modify_portfolio("remove", ticker, shares)
     elif button_id == "interval-component":
         update_prices()
 
@@ -220,10 +279,12 @@ def modify_data(add_clicks, remove_clicks, n_intervals, ticker, shares, avg_pric
         "market_value": f"{df['market_value_num'].sum():,.0f}",
         "last_updated": "",
         "Total_Profit_Loss": f"{df['Total_Profit_Loss_num'].sum():,.0f}",
+        "holding_type": ""
     }])
     df= df[df["ticker"] != "TOTAL"]
     df = pd.concat([df, last_row], ignore_index=True)
     df_chart = df[df["ticker"] != "TOTAL"]
     chart_fig = make_big_pie(df_chart)
+    holding_fig= make_holding_type_chart(df_chart)
     table_data = df.to_dict("records")
-    return table_data, chart_fig
+    return table_data, chart_fig,holding_fig
