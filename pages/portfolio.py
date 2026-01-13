@@ -73,7 +73,7 @@ def make_holding_type_chart(df):
                 "Moonshot": "#F44336",
             },
         )
-        fig.update_yaxes(range=[0, 100], ticksuffix="%")
+        fig.update_yaxes(range=[0, 100], ticksuffix="%",tickformat=".0f")
 
         fig.update_yaxes(ticksuffix="%", separatethousands=True)
         return fig
