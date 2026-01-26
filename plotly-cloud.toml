@@ -1,0 +1,6 @@
+name = "Family-dashboard"
+app_id = "ba2f83fa-6b1a-40d7-a58d-4c0d2c755c59"
+app_url = "7beaa506-bae2-4711-abae-b6209ed756a8"
+
+[build]
+include = ["**/*"]

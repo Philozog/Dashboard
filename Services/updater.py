@@ -48,7 +48,6 @@ def update_prices():
         "ticker": row["ticker"],
     }
 )
-    print(f"✅ Updated {row['ticker']} to {price}")
        
 
  
