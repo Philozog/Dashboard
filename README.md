@@ -5,7 +5,7 @@ A Python-based personal portfolio management system that tracks equity holdings,
 This project is designed to be **simple, reliable, and production-safe**, avoiding common pitfalls such as duplicate rows, table rewrites, or misleading “fake live” prices.
 
 This portfolio is functioning both locally and on Plotly servers
-
+The app is deployed via plotly app publish; all imports must be listed in requirements.txt, and app.py must be import-safe (no app.run()).
 ---
 
 ## 🚀 Features
