@@ -3,12 +3,10 @@ import dash
 import os
 from sqlalchemy import create_engine
 
-engine = create_engine("sqlite:///portfolio.db")
-def init_db():
-if not os.path.exists("portfolio.db"):
-    import data_base  # Initialize the database if it doesn't exist
+base_dir=os.path.dirname(__file__)
+db_path=os.path.join(base_dir,"portfolio.db")
 
-init_db()
+engine = create_engine(f"sqlite:///{db_path}")
 
 
 app = Dash(__name__,use_pages=True)
@@ -18,5 +16,4 @@ app.layout = html.Div(
     
 server=app.server
    
-if __name__ == "__main__":
-    app.run(debug=True)
+

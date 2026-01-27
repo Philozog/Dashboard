@@ -1,3 +1,7 @@
-git remote add origin https://github.com/Philozog/Dashboard.git
-git branch -M main
-git push -u origin main
+
+#For local run
+
+from app import app
+
+if __name__ == "__main__":
+    app.run(debug=True)
