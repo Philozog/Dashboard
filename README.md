@@ -1,8 +1,10 @@
-# 📊 Portfolio Dashboard & Price Updater
+# 📊 Portfolio Dashboard 
 
 A Python-based personal portfolio management system that tracks equity holdings, updates live prices from Yahoo Finance, and visualizes portfolio allocation through an interactive dashboard.
 
 This project is designed to be **simple, reliable, and production-safe**, avoiding common pitfalls such as duplicate rows, table rewrites, or misleading “fake live” prices.
+
+This portfolio is functioning both locally and on Plotly servers
 
 ---
 
