@@ -1,25 +1,28 @@
 from dash import Dash, html
+import dash
 import os
 from sqlalchemy import create_engine
 
-
-base_dir = os.path.dirname(__file__)
-db_path = os.path.join(base_dir, "portfolio.db")
+base_dir=os.path.dirname(__file__)
+db_path=os.path.join(base_dir,"portfolio.db")
 
 engine = create_engine(f"sqlite:///{db_path}")
 
 
-app = Dash(__name__, use_pages=True)
-
-from pages import covariance, portfolio
-
+app = Dash(__name__,use_pages=True)
 
 app.layout = html.Div(
-    [
-        portfolio.layout,
-        html.Hr(style={"margin": "36px 0"}),
-        covariance.layout,
-    ]
-)
 
-server = app.server
+     html.H1("Joe Zoghzoghi Portfolio Dashboard"),
+
+    html.Div([
+        
+    dcc.Link(page["name"], href=page["path"], style={"margin-right": "20px"})
+    for page in dash.page_registry.values()
+])
+,
+    [dash.page_container])
+    
+server=app.server
+   
+
