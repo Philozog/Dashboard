@@ -1,0 +1,67 @@
+/* Global */
+body {
+    font-family: "Inter", "Segoe UI", sans-serif;
+    background-color: #f4f7fb;
+    margin: 0;
+    padding: 24px;
+    color: #1e293b;
+}
+
+/* Title */
+.main-title {
+    text-align: center;
+    font-size: 40px;
+    font-weight: 700;
+    color: #1d4ed8;
+    margin-bottom: 30px;
+}
+
+
+/*Subtitle */
+.subtitle {
+    color: #1d4ed8;
+    font-weight: 600;
+    font-size: 26px;
+    margin-bottom: 20px;
+}
+
+
+/* Navbar */
+.navbar {
+    margin-bottom: 30px;
+}
+
+/* Navigation links */
+.nav-link {
+    margin-right: 25px;
+    color: #2563eb;
+    font-weight: 600;
+    text-decoration: none;
+    font-size: 16px;
+}
+
+.nav-link:hover {
+    color: #1e40af;
+}
+
+/* Buttons */
+button {
+    background-color: #2563eb;
+    color: white;
+    border: none;
+    padding: 8px 14px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-weight: 500;
+}
+
+button:hover {
+    background-color: #1e40af;
+}
+
+/* Dash Table Header */
+.dash-table-container .dash-spreadsheet-container .dash-header {
+    background-color: #2563eb !important;
+    color: white !important;
+    font-weight: 600;
+}

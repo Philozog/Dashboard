@@ -11,11 +11,14 @@ engine = create_engine(f"sqlite:///{db_path}")
 app = Dash(__name__, use_pages=True)
 
 app.layout = html.Div([
-    html.H1("Joe Zoghzoghi Portfolio Dashboard"),
+    html.H1("Joe Zoghzoghi Portfolio", className="main-title"),
+
+    # Navigation Bar
     html.Div([
-        dcc.Link(page["name"], href=page["path"], style={"margin-right": "20px"})
+        dcc.Link(page["name"], href=page["path"], className="nav-link")
         for page in dash.page_registry.values()
-    ]),
+    ], className="navbar"),
+
     dash.page_container,
 ])
 

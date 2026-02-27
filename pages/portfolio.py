@@ -183,7 +183,7 @@ def modify_portfolio(action, ticker, shares=None, avg_price=None, holding_type=N
 
 dash.register_page(__name__, path="/")
 layout = html.Div([
-    html.H1(" Joe Zoghzoghi Portfolio Dashboard", style={"textAlign": "center", "marginBottom": "20px", "color": "#EA84FC"}),
+    
     html.Div([
         dcc.Input(id="ticker-input", type="text", placeholder="Ticker (e.g. AAPL)"),
         dcc.Input(id="shares-input", type="number", placeholder="Shares", min=1),
