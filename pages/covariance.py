@@ -1,7 +1,7 @@
 import sqlite3
 
 import dash
-from dash import Input, Output, dcc, html, dash_table
+from dash import Input, Output, dcc, html
 import numpy as np
 import pandas as pd
 import plotly.express as px
@@ -36,9 +36,9 @@ def _metric_card(title, value_id):
 
 layout = html.Div(
     [
-        html.H1(
+        html.H2(
             "Portfolio Covariance Matrix",
-            style={"textAlign": "center", "marginBottom": "20px", "color": "#EA84FC"},
+            className="subtitle"
         ),
         html.Div(
             [
@@ -50,14 +50,6 @@ layout = html.Div(
         ),
         html.Div(id="covariance-status", style={"marginBottom": "12px"}),
         dcc.Graph(id="covariance-heatmap"),
-        dash_table.DataTable(
-            id="covariance-table",
-            data=[],
-            columns=[],
-            style_header={"backgroundColor": "#EA84FC", "fontWeight": "bold", "color": "black"},
-            style_table={"overflowX": "auto"},
-            style_cell={"textAlign": "center", "padding": "6px"},
-        ),
         dcc.Interval(id="covariance-refresh", interval=60 * 1000, n_intervals=0),
     ]
 )
@@ -152,7 +144,7 @@ def _format_metric_texts(portfolio_vol_ann, spy_vol_ann, diversification_ratio):
             spread_text = f"Spread {spread_pp:+.2f} pp"
         spy_text = f"SPY {spy_vol_ann * 100:.2f}% | {spread_text}"
 
-    diversification_text = "--" if diversification_ratio is None else f"{diversification_ratio:.3f}"
+    diversification_text = "--" if diversification_ratio is None else f"{diversification_ratio:.1f}"
     return portfolio_text, spy_text, diversification_text
 
 
@@ -186,8 +178,6 @@ def _build_covariance_outputs(holdings):
         return (
             html.Div("No holdings found."),
             _empty_figure("No holdings found."),
-            [],
-            [],
             default_portfolio,
             default_spy,
             default_div,
@@ -210,8 +200,6 @@ def _build_covariance_outputs(holdings):
         return (
             html.Div(f"Unable to fetch market data: {exc}"),
             _empty_figure("Market data request failed."),
-            [],
-            [],
             default_portfolio,
             default_spy,
             default_div,
@@ -222,8 +210,6 @@ def _build_covariance_outputs(holdings):
         return (
             html.Div("Insufficient price history to compute covariance."),
             _empty_figure("No usable price history."),
-            [],
-            [],
             default_portfolio,
             default_spy,
             default_div,
@@ -289,8 +275,6 @@ def _build_covariance_outputs(holdings):
         return (
             html.Div(" ".join(status_parts)),
             _empty_figure("Insufficient return history for covariance."),
-            [],
-            [],
             portfolio_metric,
             spy_metric,
             div_metric,
@@ -302,8 +286,6 @@ def _build_covariance_outputs(holdings):
         return (
             html.Div(" ".join(status_parts)),
             _empty_figure("Covariance matrix unavailable."),
-            [],
-            [],
             portfolio_metric,
             spy_metric,
             div_metric,
@@ -328,20 +310,9 @@ def _build_covariance_outputs(holdings):
     )
     fig.update_layout(title="Covariance Matrix (Daily Returns, 1Y)")
 
-    display_df = cov.copy()
-    display_df.insert(0, "ticker", display_df.index)
-    for col in cov.columns:
-        display_df[col] = display_df[col].map(lambda value: f"{value:.6f}")
-
-    columns = [{"name": "Ticker", "id": "ticker"}] + [
-        {"name": col, "id": col} for col in cov.columns
-    ]
-
     return (
         html.Div(" ".join(status_parts)),
         fig,
-        display_df.to_dict("records"),
-        columns,
         portfolio_metric,
         spy_metric,
         div_metric,
@@ -351,8 +322,6 @@ def _build_covariance_outputs(holdings):
 @dash.callback(
     Output("covariance-status", "children"),
     Output("covariance-heatmap", "figure"),
-    Output("covariance-table", "data"),
-    Output("covariance-table", "columns"),
     Output("covariance-metric-portfolio-vol", "children"),
     Output("covariance-metric-spy-vol", "children"),
     Output("covariance-metric-div-ratio", "children"),
