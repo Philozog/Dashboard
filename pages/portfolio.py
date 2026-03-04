@@ -5,6 +5,7 @@ from dash.dependencies import Input, Output, State
 import pandas as pd
 import sqlite3
 import plotly.express as px
+import plotly.graph_objects as go
 import yfinance as yf
 
 from Services.updater import update_prices
@@ -73,6 +74,20 @@ def make_holding_type_chart(df):
                 "Moonshot": "#F44336",
             },
         )
+
+        targets={
+            "Core": 50,
+            "High Conviction": 30,
+            "Moonshot": 10}
+        
+        fig.add_trace(go.Scatter(
+            x=list(targets.keys()),
+            y=list(targets.values()),
+            mode="markers",
+            marker=dict(color="red", size=258, symbol="line-ew",line=dict(width=2)),name="Target"))
+
+
+   
         fig.update_yaxes(range=[0, 100], ticksuffix="%",tickformat=".0f")
 
         fig.update_yaxes(ticksuffix="%", separatethousands=True)
