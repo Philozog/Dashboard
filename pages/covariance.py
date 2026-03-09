@@ -36,10 +36,7 @@ def _metric_card(title, value_id):
 
 layout = html.Div(
     [
-        html.H2(
-            "Portfolio Covariance Matrix",
-            className="subtitle"
-        ),
+        html.H2("Portfolio Correlation Matrix", className="subtitle"),
         html.Div(
             [
                 _metric_card("Portfolio Annualized Volatility", "covariance-metric-portfolio-vol"),
@@ -50,6 +47,7 @@ layout = html.Div(
         ),
         html.Div(id="covariance-status", style={"marginBottom": "12px"}),
         dcc.Graph(id="covariance-heatmap"),
+        html.Div(id="covariance-insights", style={"marginTop": "12px"}),
         dcc.Interval(id="covariance-refresh", interval=60 * 1000, n_intervals=0),
     ]
 )
@@ -61,7 +59,7 @@ def _empty_figure(message):
     fig.update_xaxes(visible=False)
     fig.update_yaxes(visible=False)
     fig.update_layout(
-        title="Covariance Matrix",
+        title="Correlation Matrix",
         annotations=[
             {
                 "text": message,
@@ -91,12 +89,7 @@ def _load_holdings():
     if df.empty:
         return df
 
-    df["ticker"] = (
-        df["ticker"]
-        .astype(str)
-        .str.strip()
-        .str.upper()
-    )
+    df["ticker"] = df["ticker"].astype(str).str.strip().str.upper()
     df = df[df["ticker"] != ""]
     return df
 
@@ -171,6 +164,73 @@ def _build_weight_series(holdings, valid_tickers):
     return pd.Series(np.full(len(valid_tickers), equal_weight), index=valid_tickers)
 
 
+def _empty_insights(message):
+    return html.Div(
+        [
+            html.H4("Correlation Insights", style={"marginBottom": "8px"}),
+            html.Div(message),
+        ],
+        style={
+            "padding": "12px",
+            "border": "1px solid #e5e5e5",
+            "borderRadius": "8px",
+            "backgroundColor": "#fafafa",
+        },
+    )
+
+
+def _build_correlation_insights(corr):
+    if corr.empty or corr.shape[0] < 2:
+        return _empty_insights("No standout correlation pairs yet.")
+
+    pair_rows = []
+    columns = corr.columns.tolist()
+    for left_idx, left_ticker in enumerate(columns):
+        for right_idx in range(left_idx + 1, len(columns)):
+            right_ticker = columns[right_idx]
+            value = float(corr.iat[left_idx, right_idx])
+            pair_rows.append(
+                {
+                    "left": left_ticker,
+                    "right": right_ticker,
+                    "correlation": value,
+                    "abs_correlation": abs(value),
+                }
+            )
+
+    if not pair_rows:
+        return _empty_insights("No standout correlation pairs yet.")
+
+    pairs = pd.DataFrame(pair_rows).sort_values("abs_correlation", ascending=False).reset_index(drop=True)
+    threshold = float(pairs["abs_correlation"].quantile(0.8))
+    significant = pairs[pairs["abs_correlation"] >= threshold].head(5)
+    if significant.empty:
+        significant = pairs.head(min(3, len(pairs)))
+
+    insight_items = []
+    for _, row in significant.iterrows():
+        direction = "move together" if row["correlation"] >= 0 else "tend to offset each other"
+        strength = "strong" if row["abs_correlation"] >= significant["abs_correlation"].median() else "notable"
+        insight_items.append(
+            html.Li(
+                f"{row['left']} and {row['right']} {direction} with {strength} correlation ({row['correlation']:.2f})."
+            )
+        )
+
+    return html.Div(
+        [
+            html.H4("Correlation Insights", style={"marginBottom": "8px"}),
+            html.Ul(insight_items, style={"margin": "0", "paddingLeft": "20px"}),
+        ],
+        style={
+            "padding": "12px",
+            "border": "1px solid #e5e5e5",
+            "borderRadius": "8px",
+            "backgroundColor": "#fafafa",
+        },
+    )
+
+
 def _build_covariance_outputs(holdings):
     default_portfolio, default_spy, default_div = _default_metrics()
 
@@ -178,6 +238,7 @@ def _build_covariance_outputs(holdings):
         return (
             html.Div("No holdings found."),
             _empty_figure("No holdings found."),
+            _empty_insights("Add at least 2 tickers to surface pair insights."),
             default_portfolio,
             default_spy,
             default_div,
@@ -200,6 +261,7 @@ def _build_covariance_outputs(holdings):
         return (
             html.Div(f"Unable to fetch market data: {exc}"),
             _empty_figure("Market data request failed."),
+            _empty_insights("Market data request failed."),
             default_portfolio,
             default_spy,
             default_div,
@@ -208,8 +270,9 @@ def _build_covariance_outputs(holdings):
     prices_all = _extract_prices(history, symbols)
     if prices_all.empty:
         return (
-            html.Div("Insufficient price history to compute covariance."),
+            html.Div("Insufficient price history to compute correlation."),
             _empty_figure("No usable price history."),
+            _empty_insights("No usable price history for pair insights."),
             default_portfolio,
             default_spy,
             default_div,
@@ -271,48 +334,48 @@ def _build_covariance_outputs(holdings):
         status_parts.append(f"Filtered due to missing data: {', '.join(dropped)}.")
 
     if returns.shape[0] < 2 or returns.shape[1] < 2:
-        status_parts.append("Need at least 2 tickers with usable return history for covariance.")
+        status_parts.append("Need at least 2 tickers with usable return history for correlation.")
         return (
             html.Div(" ".join(status_parts)),
-            _empty_figure("Insufficient return history for covariance."),
+            _empty_figure("Insufficient return history for correlation."),
+            _empty_insights("Need at least 2 tickers with usable return history for pair insights."),
             portfolio_metric,
             spy_metric,
             div_metric,
         )
 
-    cov = returns.cov().sort_index().sort_index(axis=1)
-    if cov.empty or cov.shape[0] < 2:
-        status_parts.append("Covariance matrix unavailable after filtering.")
+    corr = returns.corr().sort_index().sort_index(axis=1)
+    if corr.empty or corr.shape[0] < 2:
+        status_parts.append("Correlation matrix unavailable after filtering.")
         return (
             html.Div(" ".join(status_parts)),
-            _empty_figure("Covariance matrix unavailable."),
+            _empty_figure("Correlation matrix unavailable."),
+            _empty_insights("Correlation matrix unavailable for pair insights."),
             portfolio_metric,
             spy_metric,
             div_metric,
         )
-
-    zmax = float(cov.abs().to_numpy().max())
-    if zmax == 0:
-        zmax = 1e-12
 
     fig = px.imshow(
-        cov.values,
-        x=cov.columns,
-        y=cov.index,
+        corr.values,
+        x=corr.columns,
+        y=corr.index,
         aspect="auto",
         color_continuous_scale="RdBu",
-        zmin=-zmax,
-        zmax=zmax,
-        labels={"x": "Ticker", "y": "Ticker", "color": "Covariance"},
+        zmin=-1,
+        zmax=1,
+        labels={"x": "Ticker", "y": "Ticker", "color": "Correlation"},
     )
     fig.update_traces(
-        hovertemplate="X: %{x}<br>Y: %{y}<br>Covariance: %{z:.6f}<extra></extra>"
+        hovertemplate="X: %{x}<br>Y: %{y}<br>Correlation: %{z:.2f}<extra></extra>"
     )
-    fig.update_layout(title="Covariance Matrix (Daily Returns, 1Y)")
+    fig.update_layout(title="Correlation Matrix (Daily Returns, 1Y)")
+    insights = _build_correlation_insights(corr)
 
     return (
         html.Div(" ".join(status_parts)),
         fig,
+        insights,
         portfolio_metric,
         spy_metric,
         div_metric,
@@ -322,6 +385,7 @@ def _build_covariance_outputs(holdings):
 @dash.callback(
     Output("covariance-status", "children"),
     Output("covariance-heatmap", "figure"),
+    Output("covariance-insights", "children"),
     Output("covariance-metric-portfolio-vol", "children"),
     Output("covariance-metric-spy-vol", "children"),
     Output("covariance-metric-div-ratio", "children"),
