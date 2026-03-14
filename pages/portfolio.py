@@ -6,7 +6,6 @@ import pandas as pd
 import sqlite3
 import plotly.express as px
 import plotly.graph_objects as go
-import yfinance as yf
 
 from Services.updater import update_prices
 from Services.helper import load_data
@@ -19,6 +18,13 @@ DB_PATH = "portfolio.db"
 
 
 def make_big_pie(df):
+    if df.empty:
+        return px.pie(
+            pd.DataFrame([{"ticker": "No holdings", "market_value_num": 1}]),
+            values="market_value_num",
+            names="ticker",
+            title="Portfolio Market Value Distribution",
+        )
     fig=px.pie(df,values="market_value_num",names="ticker",title="Portfolio Market Value Distribution",color_discrete_sequence=px.colors.sequential.Purples_r)
     fig.update_traces(textposition='inside', textinfo='percent+label')
     fig.update_layout(title={"text":"Portfolio Market Value Distribution","x":0.5,"xanchor":"center","y":0.95})
@@ -56,12 +62,27 @@ def make_portfolio_chart(df):
 
 
 def make_holding_type_chart(df):
+        if df.empty:
+            grouped = pd.DataFrame(
+                [{"holding_type": "No holdings", "market_value_num": 0.0, "percentage": 0.0}]
+            )
+            return px.bar(
+                grouped,
+                x="holding_type",
+                y="percentage",
+                title="Portfolio Allocation by Holding Type",
+                color="holding_type",
+            )
+
         grouped = (
             df.groupby("holding_type", as_index=False)["market_value_num"]
             .sum()
         )
         total = grouped["market_value_num"].sum()
-        grouped["percentage"] = grouped["market_value_num"] / total * 100
+        if total > 0:
+            grouped["percentage"] = grouped["market_value_num"] / total * 100
+        else:
+            grouped["percentage"] = 0.0
         fig = px.bar(
             grouped,
             x="holding_type",
@@ -76,7 +97,7 @@ def make_holding_type_chart(df):
         )
 
         targets={
-            "Core": 50,
+            "Core": 60,
             "High Conviction": 30,
             "Moonshot": 10}
         
@@ -196,7 +217,7 @@ def modify_portfolio(action, ticker, shares=None, avg_price=None, holding_type=N
                                         )
 
 
-dash.register_page(__name__, path="/")
+dash.register_page(__name__, path="/", name="Portfolio", title="Portfolio")
 layout = html.Div([
     
     html.Div([
@@ -238,7 +259,7 @@ layout = html.Div([
     dcc.Interval(
         id="interval-component",
         interval=60 * 1000,
-        n_intervals=5,
+        n_intervals=0,
     )
 ])
 
@@ -260,29 +281,51 @@ def modify_data(add_clicks, remove_clicks, n_intervals, ticker, shares, avg_pric
     from dash import callback_context
 
     ctx = callback_context
-    print("\n=== CALLBACK TRIGGERED ===")
-    print("Add:", add_clicks, "Remove:", remove_clicks)
-    print("Triggered:", ctx.triggered)
+    button_id = ctx.triggered[0]["prop_id"].split(".")[0] if ctx.triggered else ""
 
-   
-    
-    button_id = ctx.triggered[0]["prop_id"].split(".")[0] if ctx.triggered else "inital load"
-    print("Button clicked:", button_id)
+    try:
+        if button_id == "add-btn" and ticker and shares is not None and avg_price is not None and holding_type is not None:
+            modify_portfolio("add", ticker, shares, avg_price,holding_type)
+        elif button_id == "remove-btn" and ticker and shares is not None:
+            modify_portfolio("remove", ticker, shares)
+    except ValueError:
+        pass
 
-    if button_id == "add-btn" and ticker and shares is not None and avg_price is not None and holding_type is not None:
-        print("adding ticker...")
-        modify_portfolio("add", ticker, shares, avg_price,holding_type)
-        
-    elif button_id == "remove-btn" and ticker:
-        print("remove ticker...")
-        modify_portfolio("remove", ticker, shares)
-    elif button_id == "interval-component":
-        update_prices()
+    if button_id == "interval-component" and n_intervals:
+        try:
+            update_prices()
+        except Exception:
+            pass
 
     df = load_data()
+    if df.empty:
+        table_df = pd.DataFrame(
+            [
+                {
+                    "id": "",
+                    "ticker": "TOTAL",
+                    "shares": "",
+                    "avg_price": "",
+                    "current_price": "",
+                    "market_value": "0",
+                    "last_updated": "",
+                    "Total_Profit_Loss": "0.00",
+                    "holding_type": "",
+                }
+            ]
+        )
+        return (
+            table_df[load_data().columns].to_dict("records"),
+            make_big_pie(pd.DataFrame(columns=["ticker", "market_value_num"])),
+            make_holding_type_chart(pd.DataFrame(columns=["holding_type", "market_value_num"])),
+        )
+
     df["market_value_num"] = pd.to_numeric(df["market_value"], errors="coerce").fillna(0)
     df["current_price"] = pd.to_numeric(df["current_price"], errors="coerce").fillna(0)
     df["Total_Profit_Loss_num"] = pd.to_numeric(df["Total_Profit_Loss"], errors="coerce").fillna(0)
+    if "holding_type" not in df.columns:
+        df["holding_type"] = ""
+    df["holding_type"] = df["holding_type"].fillna("Unassigned")
     df["market_value"] = df["market_value_num"].apply(lambda x: f"{x:,.0f}")
     df["Total_Profit_Loss"] = df["Total_Profit_Loss_num"].apply(lambda x: f"{x:,.2f}")
     last_row = pd.DataFrame([{

@@ -13,41 +13,45 @@ def update_prices():
     df = pd.read_sql("SELECT * FROM portfolio", engine)
 
     with engine.begin() as conn:
-
         for _, row in df.iterrows():
+            ticker = str(row.get("ticker", "")).strip().upper()
+            if not ticker:
+                continue
 
-                # Decide if update needed
-                if row["current_price"] and row["last_updated"]:
-                    age = (datetime.now() - pd.to_datetime(row["last_updated"])).total_seconds()
-                    if age < 900:
-                        continue  # price is fresh
-
-                # Fetch price
-                data = yf.Ticker(row["ticker"]).history(period="1d")
-                if data.empty:
+            if pd.notna(row["current_price"]) and pd.notna(row["last_updated"]):
+                age = (datetime.now() - pd.to_datetime(row["last_updated"])).total_seconds()
+                if age < 900:
                     continue
 
-                price = round(data["Close"].iloc[-1], 2)
+            try:
+                data = yf.Ticker(ticker).history(period="1d")
+            except Exception:
+                continue
+            if data.empty:
+                continue
 
-            # Update ONLY this row
-                conn.execute(
-        text("""
-        UPDATE portfolio
-        SET
-            current_price = :price,
-            market_value = :market_value,
-            Total_Profit_Loss = :pnl,
-            last_updated = :last_updated
-        WHERE ticker = :ticker
-    """),
-    {
-        "price": price,
-        "market_value": price * row["shares"],
-        "pnl": (price - row["avg_price"]) * row["shares"],
-        "last_updated": datetime.now(),
-        "ticker": row["ticker"],
-    }
-)
+            price = round(data["Close"].iloc[-1], 2)
+
+            conn.execute(
+                text(
+                    """
+                    UPDATE portfolio
+                    SET
+                        current_price = :price,
+                        market_value = :market_value,
+                        Total_Profit_Loss = :pnl,
+                        last_updated = :last_updated
+                    WHERE ticker = :ticker
+                    """
+                ),
+                {
+                    "price": price,
+                    "market_value": price * row["shares"],
+                    "pnl": (price - row["avg_price"]) * row["shares"],
+                    "last_updated": datetime.now(),
+                    "ticker": ticker,
+                },
+            )
        
 
  

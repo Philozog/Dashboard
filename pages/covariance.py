@@ -9,12 +9,17 @@ import yfinance as yf
 
 
 DB_PATH = "portfolio.db"
-LOOKBACK_PERIOD = "1y"
+LOOKBACK_PERIOD = "6mo"
 LOOKBACK_INTERVAL = "1d"
 TRADING_DAYS_PER_YEAR = 252
 
 
-dash.register_page(__name__, path="/covariance", name="Covariance")
+dash.register_page(
+    __name__,
+    path="/covariance",
+    name="Covariance",
+    title="Covariance",
+)
 
 
 def _metric_card(title, value_id):
@@ -36,6 +41,7 @@ def _metric_card(title, value_id):
 
 layout = html.Div(
     [
+        dcc.Location(id='cov_location'),
         html.H2("Portfolio Correlation Matrix", className="subtitle"),
         html.Div(
             [
@@ -48,7 +54,6 @@ layout = html.Div(
         html.Div(id="covariance-status", style={"marginBottom": "12px"}),
         dcc.Graph(id="covariance-heatmap"),
         html.Div(id="covariance-insights", style={"marginTop": "12px"}),
-        dcc.Interval(id="covariance-refresh", interval=60 * 1000, n_intervals=0),
     ]
 )
 
@@ -258,6 +263,7 @@ def _build_covariance_outputs(holdings):
             threads=False,
         )
     except Exception as exc:
+        # Fail fast if remote fetch is not available
         return (
             html.Div(f"Unable to fetch market data: {exc}"),
             _empty_figure("Market data request failed."),
@@ -382,15 +388,18 @@ def _build_covariance_outputs(holdings):
     )
 
 
-@dash.callback(
-    Output("covariance-status", "children"),
-    Output("covariance-heatmap", "figure"),
-    Output("covariance-insights", "children"),
-    Output("covariance-metric-portfolio-vol", "children"),
-    Output("covariance-metric-spy-vol", "children"),
-    Output("covariance-metric-div-ratio", "children"),
-    Input("covariance-refresh", "n_intervals"),
-)
-def refresh_covariance(_):
-    holdings = _load_holdings()
-    return _build_covariance_outputs(holdings)
+if not hasattr(dash, '_covariance_callback_registered'):
+    dash._covariance_callback_registered = True
+
+    @dash.callback(
+        Output("covariance-status", "children"),
+        Output("covariance-heatmap", "figure"),
+        Output("covariance-insights", "children"),
+        Output("covariance-metric-portfolio-vol", "children"),
+        Output("covariance-metric-spy-vol", "children"),
+        Output("covariance-metric-div-ratio", "children"),
+        Input('cov_location', 'pathname')
+    )
+    def refresh_covariance(_):
+        holdings = _load_holdings()
+        return _build_covariance_outputs(holdings)

@@ -2,14 +2,19 @@ from dash import Dash, html, dcc
 import dash
 import os
 from sqlalchemy import create_engine
-import scipy
+
 
 base_dir = os.path.dirname(__file__)
 db_path = os.path.join(base_dir, "portfolio.db")
 
 engine = create_engine(f"sqlite:///{db_path}")
 
-app = Dash(__name__, use_pages=True, suppress_callback_exceptions=True)
+app = Dash(
+    __name__,
+    use_pages=True,
+    suppress_callback_exceptions=True,
+    title="Joe Zoghzoghi Portfolio",
+)
 
 app.layout = html.Div([
     html.H1("Joe Zoghzoghi Portfolio", className="main-title"),
