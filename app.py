@@ -1,23 +1,23 @@
 from dash import Dash, html, dcc
 import dash
-import os
-from sqlalchemy import create_engine
+from dotenv import load_dotenv
+
+from Services.database import get_engine
+
+load_dotenv()
 
 
-base_dir = os.path.dirname(__file__)
-db_path = os.path.join(base_dir, "portfolio.db")
-
-engine = create_engine(f"sqlite:///{db_path}")
+engine = get_engine()
 
 app = Dash(
     __name__,
     use_pages=True,
     suppress_callback_exceptions=True,
-    title="Joe Zoghzoghi Portfolio",
+    title="Apothicaire Portfolio",
 )
 
 app.layout = html.Div([
-    html.H1("Joe Zoghzoghi Portfolio", className="main-title"),
+    html.H1("Apothicaire Portfolio", className="main-title"),
 
     # Navigation Bar
     html.Div([
