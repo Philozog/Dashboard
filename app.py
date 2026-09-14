@@ -13,11 +13,11 @@ app = Dash(
     __name__,
     use_pages=True,
     suppress_callback_exceptions=True,
-    title="Apothicaire Portfolio",
+    title="Excelsior",
 )
 
 app.layout = html.Div([
-    html.H1("Apothicaire Portfolio", className="main-title"),
+    html.H1("Excelsior", className="main-title"),
 
     # Navigation Bar
     html.Div([
