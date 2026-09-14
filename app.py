@@ -1,4 +1,4 @@
-from dash import Dash, html, dcc
+from dash import Dash, html, dcc, Input, Output
 import dash
 from dotenv import load_dotenv
 
@@ -19,15 +19,26 @@ app = Dash(
 )
 
 app.layout = html.Div([
-    html.H1("Excelsior", className="main-title"),
+    dcc.Location(id="url"),
 
-    # Navigation Bar
     html.Div([
-        dcc.Link(page["name"], href=page["path"], className="nav-link")
-        for page in dash.page_registry.values()
-    ], className="navbar"),
+        html.H1("Excelsior", className="main-title"),
+
+        # Navigation Bar
+        html.Div([
+            dcc.Link(page["name"], href=page["path"], className="nav-link")
+            for page in dash.page_registry.values()
+        ], className="navbar"),
+    ], id="app-header", className="app-header"),
 
     dash.page_container,
 ])
+
+# The cover page carries its own wordmark, so hide the global title there.
+app.clientside_callback(
+    "function(path) { return path === '/' ? 'app-header is-cover' : 'app-header'; }",
+    Output("app-header", "className"),
+    Input("url", "pathname"),
+)
 
 server = app.server

@@ -16,20 +16,73 @@ from Services import insights, theme
 from pages.analytics import get_historical_prices
 
 
-def make_big_pie(df):
-    if df.empty:
-        return px.pie(
-            pd.DataFrame([{"ticker": "No holdings", "market_value_num": 1}]),
-            values="market_value_num",
-            names="ticker",
-            title="Portfolio Market Value Distribution",
-        )
-    fig=px.pie(df,values="market_value_num",names="ticker",title="Portfolio Market Value Distribution",hole=0.45)
-    fig.update_traces(
-        textposition='inside',
-        textinfo='percent+label',
-        marker={"line": {"color": "rgba(2, 6, 23, 0.6)", "width": 1.5}},
+# Diverging fill for the map: rose (loss) -> neutral slate (flat) -> emerald (gain).
+# Poles are deliberately darker than the theme accents so white tile labels stay readable.
+PNL_COLORSCALE = [[0.0, "#be123c"], [0.5, "#273449"], [1.0, "#059669"]]
+PNL_COLOR_LIMIT = 60  # +/- % at which the fill saturates
+
+
+def make_portfolio_map(df):
+    """Treemap: tile size = market value, tile colour = unrealized P&L %."""
+    title = dict(
+        text="Portfolio Map",
+        subtitle=dict(text="Sized by market value · coloured by unrealized P&L", font=dict(color=theme.MUTED, size=13)),
     )
+    if df.empty or df["market_value_num"].sum() <= 0:
+        fig = go.Figure()
+        fig.add_annotation(text="No holdings yet", showarrow=False, font=dict(color=theme.MUTED, size=15))
+        fig.update_layout(title=title, xaxis={"visible": False}, yaxis={"visible": False})
+        return fig
+
+    d = df.copy()
+    total = d["market_value_num"].sum()
+    d["weight_pct"] = d["market_value_num"] / total * 100
+    cost = d["avg_price_num"] * d["shares_num"]
+    d["pnl_pct"] = (d["Total_Profit_Loss_num"] / cost * 100).where(cost > 0, 0.0)
+    d = d.sort_values("market_value_num", ascending=False)
+
+    fig = go.Figure(go.Treemap(
+        labels=d["ticker"],
+        parents=[""] * len(d),
+        values=d["market_value_num"],
+        branchvalues="total",
+        text=[f"{v:+.0f}%" for v in d["pnl_pct"]],
+        texttemplate="<b>%{label}</b><br>%{text}",
+        textfont=dict(color=theme.TEXT_STRONG, size=14),
+        textposition="middle center",
+        customdata=d[["market_value_num", "weight_pct", "Total_Profit_Loss_num", "pnl_pct", "holding_type"]].values,
+        hovertemplate=(
+            "<b>%{label}</b> · %{customdata[4]}<br>"
+            "$%{customdata[0]:,.0f} · %{customdata[1]:.1f}% of portfolio<br>"
+            "P&L %{customdata[2]:+$,.0f} (%{customdata[3]:+.1f}%)"
+            "<extra></extra>"
+        ),
+        marker=dict(
+            colors=d["pnl_pct"],
+            colorscale=PNL_COLORSCALE,
+            cmin=-PNL_COLOR_LIMIT,
+            cmid=0,
+            cmax=PNL_COLOR_LIMIT,
+            line=dict(width=2, color="rgba(2, 6, 23, 0.9)"),
+            pad=dict(t=4, l=4, r=4, b=4),
+            showscale=True,
+            colorbar=dict(
+                orientation="h",
+                y=-0.02,
+                yanchor="top",
+                x=0.5,
+                thickness=8,
+                len=0.5,
+                ticksuffix="%",
+                tickvals=[-PNL_COLOR_LIMIT, 0, PNL_COLOR_LIMIT],
+                ticktext=[f"−{PNL_COLOR_LIMIT}%", "0%", f"+{PNL_COLOR_LIMIT}%"],
+                tickfont=dict(color=theme.MUTED, size=11),
+                outlinewidth=0,
+            ),
+        ),
+        tiling=dict(pad=2),
+    ))
+    fig.update_layout(title=title, margin=dict(l=8, r=8, t=64, b=40))
     return fig
 
 
@@ -62,9 +115,17 @@ def make_holding_type_chart(df):
             grouped,
             x="holding_type",
             y="percentage",
-            title="Portfolio Allocation by Holding Type",
             color="holding_type",
             color_discrete_map=theme.HOLDING_TYPE_COLORS,
+            custom_data=["market_value_num"],
+        )
+        fig.update_traces(
+            marker=dict(cornerradius=6, line=dict(width=0)),
+            texttemplate="%{y:.0f}%",
+            textposition="outside",
+            textfont=dict(color=theme.TEXT, size=13),
+            hovertemplate="<b>%{x}</b><br>%{y:.1f}% of portfolio · $%{customdata[0]:,.0f}<extra></extra>",
+            showlegend=False,
         )
 
         targets = insights.ALLOCATION_TARGETS
@@ -85,9 +146,22 @@ def make_holding_type_chart(df):
             x=[None], y=[None], mode="lines",
             line=dict(color=theme.TEXT_STRONG, width=2, dash="dot"), name="Target"))
 
-        fig.update_traces(width=0.6, selector={"type": "bar"})
-        fig.update_layout(barmode="overlay", legend_title_text=None)
-        fig.update_yaxes(range=[0, 100], ticksuffix="%", tickformat=".0f", title="Allocation")
+        fig.update_traces(width=0.55, selector={"type": "bar"})
+        fig.update_layout(
+            barmode="overlay",
+            title=dict(
+                text="Allocation by Holding Type",
+                subtitle=dict(
+                    text="Current share vs "
+                    + " / ".join(f"{v}%" for v in targets.values())
+                    + " targets (dotted)",
+                    font=dict(color=theme.MUTED, size=13),
+                ),
+            ),
+            legend=dict(title=None, orientation="h", x=1, xanchor="right", y=1.0, yanchor="bottom"),
+            margin=dict(t=88),
+        )
+        fig.update_yaxes(range=[0, 100], ticksuffix="%", tickformat=".0f", title=None)
         return fig
 
 
@@ -225,7 +299,7 @@ def modify_portfolio(action, ticker, shares=None, avg_price=None, holding_type=N
                 _delete_duplicate_rows()
 
 
-dash.register_page(__name__, path="/", name="Portfolio", title="Portfolio")
+dash.register_page(__name__, path="/portfolio", name="Portfolio", title="Portfolio", order=1)
 
 TABLE_BORDER = "1px solid rgba(148, 163, 184, 0.14)"
 
@@ -422,7 +496,7 @@ def modify_data(add_clicks, remove_clicks, n_intervals, ticker, shares, avg_pric
         )
         return (
             table_df[load_data().columns].to_dict("records"),
-            make_big_pie(pd.DataFrame(columns=["ticker", "market_value_num"])),
+            make_portfolio_map(pd.DataFrame(columns=["ticker", "market_value_num"])),
             make_holding_type_chart(pd.DataFrame(columns=["holding_type", "market_value_num"])),
         )
 
@@ -453,7 +527,7 @@ def modify_data(add_clicks, remove_clicks, n_intervals, ticker, shares, avg_pric
     df= df[df["ticker"] != "TOTAL"]
     df = pd.concat([df, last_row], ignore_index=True)
     df_chart = df[df["ticker"] != "TOTAL"]
-    chart_fig = make_big_pie(df_chart)
+    chart_fig = make_portfolio_map(df_chart)
     holding_fig= make_holding_type_chart(df_chart)
     table_data = df.to_dict("records")
     return table_data, chart_fig, holding_fig

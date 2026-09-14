@@ -18,8 +18,9 @@ from Services.helper import load_data
 dash.register_page(
     __name__,
     path="/analytics",
-    name="Analytics",
-    title="Analytics",
+    name="Portfolio Analytics",
+    title="Portfolio Analytics",
+    order=2,
 )
 
 TRADING_DAYS=252

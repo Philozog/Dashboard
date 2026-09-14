@@ -15,6 +15,7 @@ dash.register_page(
     path="/portfolio-news",
     name="Portfolio News",
     title="Portfolio News",
+    order=4,
 )
 
 

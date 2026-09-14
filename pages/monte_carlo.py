@@ -31,6 +31,7 @@ dash.register_page(
     path="/monte-carlo",
     name="Monte Carlo",
     title="Monte Carlo",
+    order=5,
 )
 
 

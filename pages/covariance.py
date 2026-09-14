@@ -20,6 +20,7 @@ dash.register_page(
     path="/covariance",
     name="Covariance",
     title="Covariance",
+    order=3,
 )
 
 
