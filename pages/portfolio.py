@@ -241,10 +241,21 @@ layout = html.Div([
     html.Div([
         html.Div([
             html.H3("Today's takeaways", className="card-title"),
-            html.Span(id="takeaways-stamp", className="muted"),
+            html.Div([
+                html.Span(id="takeaways-stamp", className="muted"),
+                html.Button("Generate takeaways", id="takeaways-btn", n_clicks=0),
+            ], className="toolbar"),
         ], className="card-header"),
         dcc.Loading(
-            html.Div(id="takeaways-list", className="takeaways"),
+            html.Div(
+                html.Div(
+                    "Press Generate to analyse concentration, allocation drift, P&L outliers, "
+                    "correlated positions and the latest headline.",
+                    className="muted",
+                ),
+                id="takeaways-list",
+                className="takeaways",
+            ),
             type="dot",
             color=theme.ACCENT_BRIGHT,
         ),
@@ -599,19 +610,22 @@ if not hasattr(dash, "_portfolio_inline_news_registered"):
         holdings = insights.prepare_holdings(load_data())
         return [_rebalance_row(row) for row in insights.rebalance_plan(holdings)]
 
+    # Generated on demand (button) rather than on every table refresh, so the
+    # card reads as an analysis step the user triggers.
     @dash.callback(
         Output("takeaways-list", "children"),
         Output("takeaways-stamp", "children"),
-        Input("portfolio-table", "data"),
+        Input("takeaways-btn", "n_clicks"),
+        prevent_initial_call=True,
     )
-    def render_takeaways(_table_data):
+    def render_takeaways(_n_clicks):
         holdings = insights.prepare_holdings(load_data())
         rows = insights.rebalance_plan(holdings)
         tickers = holdings["ticker"].tolist()
         pairs = _correlated_pairs_cached(tickers) if tickers else []
         headline = _top_headline(tickers) if tickers else None
         items = insights.takeaways(holdings, rows, pairs, headline)
-        return [_takeaway(level, text) for level, text in items], f"as of {datetime.now():%H:%M}"
+        return [_takeaway(level, text) for level, text in items], f"Generated {datetime.now():%H:%M}"
 
     @dash.callback(
         Output("portfolio-inline-news-feed", "children"),
