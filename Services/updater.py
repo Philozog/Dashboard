@@ -1,13 +1,15 @@
 import yfinance as yf
 import pandas as pd
-from sqlalchemy import create_engine, text
+from sqlalchemy import text
 from datetime import datetime
+
+from Services.database import get_engine
 
 
 # DATA from YAHOO FINANCE
 # Connect to your existing database
 # KEEP Dashboard Current and LIVE
-engine = create_engine("sqlite:///portfolio.db")
+engine = get_engine()
 
 def update_prices():
     df = pd.read_sql("SELECT * FROM portfolio", engine)

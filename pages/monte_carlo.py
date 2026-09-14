@@ -15,6 +15,15 @@ LOOKBACK_INTERVAL = "1d"
 DEFAULT_SIMULATIONS = 10000
 DEFAULT_YEARS = 1
 
+# A raw 5y trailing mean return can be dominated by a single stock's temporary rally
+# (e.g. an AI-driven run) that isn't a reasonable assumption for future expected return.
+# Each holding's historical drift is shrunk toward this long-run market benchmark and
+# capped, so no individual name's recent momentum can dominate the projection.
+BENCHMARK_ANNUAL_RETURN = 0.08
+DRIFT_SHRINKAGE = 0.5
+MAX_ANNUAL_DRIFT = 0.20
+MIN_ANNUAL_DRIFT = -0.20
+
 
 dash.register_page(
     __name__,
@@ -134,9 +143,16 @@ def _build_weights(holdings, valid_tickers):
     return position_values / total_value, total_value
 
 
+def _shrink_drift(daily_mean):
+    annual_mean = daily_mean * TRADING_DAYS_PER_YEAR
+    shrunk = DRIFT_SHRINKAGE * annual_mean + (1 - DRIFT_SHRINKAGE) * BENCHMARK_ANNUAL_RETURN
+    shrunk = shrunk.clip(lower=MIN_ANNUAL_DRIFT, upper=MAX_ANNUAL_DRIFT)
+    return shrunk / TRADING_DAYS_PER_YEAR
+
+
 def _simulate_portfolio_paths(returns, weights, initial_value, years, simulations):
     steps = max(int(years * TRADING_DAYS_PER_YEAR), 1)
-    daily_mean = returns.mean().to_numpy(dtype=float)
+    daily_mean = _shrink_drift(returns.mean()).to_numpy(dtype=float)
     daily_cov = returns.cov().to_numpy(dtype=float)
     weight_vector = weights.reindex(returns.columns).fillna(0.0).to_numpy(dtype=float)
 
@@ -294,8 +310,10 @@ def _build_explanation(current_value, median_value, downside_value, upside_value
                 f"{_format_percent(loss_probability)} chance of finishing below today's value."
             ),
             html.P(
-                "This is a probability model, not a forecast. It assumes the future behaves broadly like the recent return "
-                "distribution and covariance structure, and it does not model trading, contributions, taxes, or regime changes."
+                f"This is a probability model, not a forecast. Volatility and correlations come from recent history, but "
+                f"each holding's expected return is shrunk {DRIFT_SHRINKAGE:.0%} toward a {_format_percent(BENCHMARK_ANNUAL_RETURN)} "
+                f"long-run benchmark and capped at {_format_percent(MAX_ANNUAL_DRIFT)}, so a stock's recent rally or slump isn't "
+                f"assumed to continue at the same pace. It does not model trading, contributions, taxes, or regime changes."
             ),
         ],
         style={

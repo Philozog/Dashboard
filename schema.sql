@@ -8,7 +8,8 @@ CREATE TABLE IF NOT EXISTS portfolio (
     current_price REAL,
     market_value REAL,
     last_updated TIMESTAMP ,
-    Total_Profit_Loss REAL
+    Total_Profit_Loss REAL,
+    holding_type TEXT
 );
 
 

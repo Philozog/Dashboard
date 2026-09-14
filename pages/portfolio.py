@@ -9,12 +9,8 @@ import plotly.graph_objects as go
 
 from Services.updater import update_prices
 from Services.helper import load_data
-
-
-
-DB_PATH = "portfolio.db"
-
-
+from Services.database import DB_PATH
+from Services.news import fetch_portfolio_news
 
 
 def make_big_pie(df):
@@ -32,33 +28,6 @@ def make_big_pie(df):
 
 
 
-
-def make_portfolio_chart(df):
-        fig = px.bar(
-            df,
-            x="ticker",
-            y="market_value_num",
-            title="Portfolio Market Value Distribution",
-            text="Total_Profit_Loss_num",
-        )
-        fig.update_traces(
-            marker_color="#B884FC",
-            textposition="none",
-        )
-
-        fig.update_layout(
-            template="seaborn",
-            title_font=dict(size=26, family="Arial", color="#333"),
-            xaxis_title="Ticker",
-            yaxis_title="Market Value ($)",
-            yaxis=dict(showgrid=False, gridcolor="white", zeroline=False),
-            paper_bgcolor="white",
-            height=250,
-            margin=dict(l=50, r=30, t=80, b=40),
-        )
-
-        fig.update_yaxes(tickprefix="$", separatethousands=True)
-        return fig
 
 
 def make_holding_type_chart(df):
@@ -134,9 +103,31 @@ def modify_portfolio(action, ticker, shares=None, avg_price=None, holding_type=N
 
     with sqlite3.connect(DB_PATH) as conn:
         conn.row_factory = sqlite3.Row
-        existing = conn.execute(
-            "SELECT * FROM portfolio WHERE ticker = ?", (ticker,)
-        ).fetchone()
+        existing_rows = conn.execute(
+            "SELECT rowid AS _rowid, * FROM portfolio WHERE ticker = ? ORDER BY rowid",
+            (ticker,),
+        ).fetchall()
+        existing = existing_rows[0] if existing_rows else None
+        existing_rowids = [row["_rowid"] for row in existing_rows]
+        primary_rowid = existing_rowids[0] if existing_rowids else None
+
+        def _existing_shares():
+            return sum(_to_float(row["shares"]) for row in existing_rows)
+
+        def _existing_avg_price():
+            total_shares = _existing_shares()
+            if total_shares <= 0:
+                return _to_float(existing["avg_price"]) if existing else 0.0
+
+            weighted_cost = sum(
+                _to_float(row["avg_price"]) * _to_float(row["shares"])
+                for row in existing_rows
+            )
+            return weighted_cost / total_shares
+
+        def _delete_duplicate_rows():
+            for duplicate_rowid in existing_rowids[1:]:
+                conn.execute("DELETE FROM portfolio WHERE rowid = ?", (duplicate_rowid,))
 
         if action == "add":
             if shares is None or avg_price is None or holding_type is None:
@@ -144,10 +135,18 @@ def modify_portfolio(action, ticker, shares=None, avg_price=None, holding_type=N
 
             shares = float(shares)
             avg_price = float(avg_price)
+            current_shares = _existing_shares()
+            new_shares = current_shares + shares
+            if current_shares > 0:
+                existing_avg_price = _existing_avg_price()
+                avg_price = (
+                    (existing_avg_price * current_shares) + (avg_price * shares)
+                ) / new_shares
+
             current_price = _to_float(existing["current_price"]) if existing else 0.0
             price_basis = current_price if current_price else avg_price
-            market_value = price_basis * shares
-            total_profit_loss = (current_price - avg_price) * shares if current_price else 0.0
+            market_value = price_basis * new_shares
+            total_profit_loss = (current_price - avg_price) * new_shares if current_price else 0.0
             timestamp = pd.Timestamp.now().isoformat()
 
             if existing:
@@ -156,10 +155,11 @@ def modify_portfolio(action, ticker, shares=None, avg_price=None, holding_type=N
                     UPDATE portfolio
                     SET shares = ?, avg_price = ?, market_value = ?,
                         Total_Profit_Loss = ?, last_updated = ?, holding_type=?
-                    WHERE ticker = ?
+                    WHERE rowid = ?
                     """,
-                    (shares, avg_price, market_value,total_profit_loss, timestamp, holding_type, ticker),
+                    (new_shares, avg_price, market_value,total_profit_loss, timestamp, holding_type, primary_rowid),
                 )
+                _delete_duplicate_rows()
             else:
                 conn.execute(
                     """
@@ -170,7 +170,7 @@ def modify_portfolio(action, ticker, shares=None, avg_price=None, holding_type=N
                                                     """,
                         (
                             ticker,
-                            shares,
+                            new_shares,
                             avg_price,
                             current_price,
                             market_value,
@@ -186,13 +186,13 @@ def modify_portfolio(action, ticker, shares=None, avg_price=None, holding_type=N
             if shares is None:
                 raise ValueError("Shares are required when removing a ticker.")
 
-            current_shares = _to_float(existing["shares"])
+            current_shares = _existing_shares()
             new_shares = current_shares - float(shares)
 
             if new_shares <= 0:
                 conn.execute("DELETE FROM portfolio WHERE ticker = ?", (ticker,))
             else:
-                avg_price_existing = _to_float(existing["avg_price"])
+                avg_price_existing = _existing_avg_price()
                 current_price = _to_float(existing["current_price"])
                 price_basis = current_price if current_price else avg_price_existing
                 market_value = price_basis * new_shares
@@ -205,16 +205,17 @@ def modify_portfolio(action, ticker, shares=None, avg_price=None, holding_type=N
                     """
                     UPDATE portfolio
                     SET shares = ?, market_value = ?, Total_Profit_Loss = ?, last_updated = ?
-                WHERE ticker = ?
+                WHERE rowid = ?
                                 """,
                         (
                             new_shares,
                             market_value,
                             total_profit_loss,
                             timestamp,
-                            ticker,
+                            primary_rowid,
                         ),
                                         )
+                _delete_duplicate_rows()
 
 
 dash.register_page(__name__, path="/", name="Portfolio", title="Portfolio")
@@ -260,7 +261,20 @@ layout = html.Div([
         id="interval-component",
         interval=60 * 1000,
         n_intervals=0,
-    )
+    ),
+
+    # Stock news section
+    html.Hr(style={"margin": "28px 0 20px"}),
+    html.Div(
+        [
+            html.H3("Stock News", style={"margin": "0", "fontSize": "18px"}),
+            html.Button("Refresh News", id="portfolio-news-btn", n_clicks=0),
+        ],
+        style={"display": "flex", "justifyContent": "space-between", "alignItems": "center", "marginBottom": "8px"},
+    ),
+    html.Div(id="portfolio-inline-news-status", style={"fontSize": "13px", "color": "#64748b", "marginBottom": "12px"}),
+    html.Div(id="portfolio-inline-news-feed", className="news-feed"),
+    dcc.Store(id="portfolio-inline-news-data"),
 ])
 
 
@@ -321,11 +335,16 @@ def modify_data(add_clicks, remove_clicks, n_intervals, ticker, shares, avg_pric
         )
 
     df["market_value_num"] = pd.to_numeric(df["market_value"], errors="coerce").fillna(0)
+    df["shares_num"] = pd.to_numeric(df["shares"], errors="coerce").fillna(0)
+    df["avg_price_num"] = pd.to_numeric(df["avg_price"], errors="coerce").fillna(0)
     df["current_price"] = pd.to_numeric(df["current_price"], errors="coerce").fillna(0)
     df["Total_Profit_Loss_num"] = pd.to_numeric(df["Total_Profit_Loss"], errors="coerce").fillna(0)
     if "holding_type" not in df.columns:
         df["holding_type"] = ""
     df["holding_type"] = df["holding_type"].fillna("Unassigned")
+    df["shares"] = df["shares_num"].apply(lambda x: f"{x:,.0f}" if x.is_integer() else f"{x:,.4f}")
+    df["avg_price"] = df["avg_price_num"].apply(lambda x: f"{x:,.2f}")
+    df["current_price"] = df["current_price"].apply(lambda x: f"{x:,.2f}")
     df["market_value"] = df["market_value_num"].apply(lambda x: f"{x:,.0f}")
     df["Total_Profit_Loss"] = df["Total_Profit_Loss_num"].apply(lambda x: f"{x:,.2f}")
     last_row = pd.DataFrame([{
@@ -345,4 +364,108 @@ def modify_data(add_clicks, remove_clicks, n_intervals, ticker, shares, avg_pric
     chart_fig = make_big_pie(df_chart)
     holding_fig= make_holding_type_chart(df_chart)
     table_data = df.to_dict("records")
-    return table_data, chart_fig,holding_fig
+    return table_data, chart_fig, holding_fig
+
+
+if not hasattr(dash, "_portfolio_inline_news_registered"):
+    dash._portfolio_inline_news_registered = True
+
+    from datetime import datetime, timezone
+
+    def _serialize(article):
+        a = dict(article)
+        if isinstance(a.get("published_at"), datetime):
+            a["published_at"] = a["published_at"].isoformat()
+        return a
+
+    def _deserialize(article):
+        a = dict(article)
+        if isinstance(a.get("published_at"), str):
+            a["published_at"] = datetime.fromisoformat(a["published_at"])
+        return a
+
+    def _label(score):
+        if score >= 7:
+            return "High impact"
+        if score >= 3:
+            return "Watch"
+        return "Latest"
+
+    def _relative_time(published_at):
+        delta = datetime.now(timezone.utc) - published_at
+        hours = max(int(delta.total_seconds() // 3600), 0)
+        if hours < 1:
+            return "< 1h ago"
+        if hours < 24:
+            return f"{hours}h ago"
+        return f"{hours // 24}d ago"
+
+    def _inline_news_card(article):
+        label = _label(article.get("importance_score", 0))
+        pub = article["published_at"]
+        return html.Div(
+            [
+                html.Div(
+                    [
+                        html.Span(article["ticker"], className="news-ticker"),
+                        html.Span(label, className=f"news-impact news-impact-{label.lower().replace(' ', '-')}"),
+                    ],
+                    className="news-card-topline",
+                ),
+                html.A(
+                    article["title"],
+                    href=article["url"],
+                    target="_blank",
+                    rel="noreferrer",
+                    className="news-title",
+                ),
+                html.Div(
+                    [html.Span(article["source"]), html.Span(_relative_time(pub))],
+                    className="news-meta",
+                ),
+                html.P(article.get("description") or "", className="news-description"),
+                html.Div(
+                    html.A("Read →", href=article["url"], target="_blank", rel="noreferrer", className="news-action"),
+                    className="news-card-footer",
+                ),
+            ],
+            className="news-card",
+        )
+
+    @dash.callback(
+        Output("portfolio-inline-news-data", "data"),
+        Output("portfolio-inline-news-status", "children"),
+        Input("portfolio-news-btn", "n_clicks"),
+        Input("interval-component", "n_intervals"),
+    )
+    def fetch_inline_news(n_clicks, n_intervals):
+        holdings = load_data()
+        if holdings.empty:
+            return [], "No holdings found."
+        tickers = (
+            holdings["ticker"].dropna().astype(str).str.strip().str.upper().tolist()
+        )
+        tickers = [t for t in tickers if t]
+        if not tickers:
+            return [], "No holdings found."
+        try:
+            articles = fetch_portfolio_news(tickers, per_ticker=5, max_items=9)
+        except Exception:
+            return [], "Could not fetch news right now — check your NEWS_API_KEY."
+        if not articles:
+            return [], "No recent news found for your holdings."
+        status = f"{len(articles)} recent headlines across {len({a['ticker'] for a in articles})} holdings."
+        return [_serialize(a) for a in articles], status
+
+    @dash.callback(
+        Output("portfolio-inline-news-feed", "children"),
+        Input("portfolio-inline-news-data", "data"),
+    )
+    def render_inline_news(data):
+        articles = [_deserialize(a) for a in (data or [])]
+        if not articles:
+            return html.Div(
+                "Click 'Refresh News' to load the latest headlines for your holdings.",
+                style={"color": "#94a3b8", "padding": "12px 0"},
+            )
+        return [_inline_news_card(a) for a in articles]

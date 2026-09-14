@@ -7,8 +7,9 @@ import pandas as pd
 import plotly.express as px
 import yfinance as yf
 
+from Services.database import DB_PATH
 
-DB_PATH = "portfolio.db"
+
 LOOKBACK_PERIOD = "6mo"
 LOOKBACK_INTERVAL = "1d"
 TRADING_DAYS_PER_YEAR = 252
