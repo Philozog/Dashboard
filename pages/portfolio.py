@@ -1,6 +1,7 @@
 from dash import dcc, html, dash_table
 import dash
 from dash.dependencies import Input, Output, State
+from datetime import datetime, timedelta, timezone
 
 import pandas as pd
 import sqlite3
@@ -11,7 +12,8 @@ from Services.updater import update_prices
 from Services.helper import load_data
 from Services.database import DB_PATH
 from Services.news import NewsFetchError, describe_fetch, fetch_portfolio_news
-from Services import theme
+from Services import insights, theme
+from pages.analytics import get_historical_prices
 
 
 def make_big_pie(df):
@@ -65,10 +67,7 @@ def make_holding_type_chart(df):
             color_discrete_map=theme.HOLDING_TYPE_COLORS,
         )
 
-        targets={
-            "Core": 60,
-            "High Conviction": 30,
-            "Moonshot": 10}
+        targets = insights.ALLOCATION_TARGETS
 
         # One short target line per category, drawn in category coordinates
         # so it sits exactly over its bar regardless of chart width.
@@ -238,6 +237,19 @@ layout = html.Div([
         html.P("Holdings, allocation and the headlines that move them.", className="page-subtitle"),
     ], className="page-header"),
 
+    # Today's takeaways — what to look at first
+    html.Div([
+        html.Div([
+            html.H3("Today's takeaways", className="card-title"),
+            html.Span(id="takeaways-stamp", className="muted"),
+        ], className="card-header"),
+        dcc.Loading(
+            html.Div(id="takeaways-list", className="takeaways"),
+            type="dot",
+            color=theme.ACCENT_BRIGHT,
+        ),
+    ], className="card"),
+
     # Add / remove controls
     html.Div([
         html.Div("Manage holdings", className="card-title"),
@@ -312,6 +324,18 @@ layout = html.Div([
         html.Div(dcc.Graph(id="value-chart"), className="card"),
         html.Div(dcc.Graph(id="holding-type-chart"), className="card"),
     ], className="section-grid two"),
+
+    # Rebalance actions — allocation drift turned into trades
+    html.Div([
+        html.Div([
+            html.H3("Rebalance actions", className="card-title"),
+            html.Span(
+                "Targets: " + " · ".join(f"{k} {v}%" for k, v in insights.ALLOCATION_TARGETS.items()),
+                className="muted",
+            ),
+        ], className="card-header"),
+        html.Div(id="rebalance-rows", className="rebalance"),
+    ], className="card"),
 
     dcc.Interval(
         id="interval-component",
@@ -514,6 +538,80 @@ if not hasattr(dash, "_portfolio_inline_news_registered"):
             return [], f"No recent news found for your holdings. {describe_fetch()}"
         status = f"{len(articles)} recent headlines across {len({a['ticker'] for a in articles})} holdings. {describe_fetch()}"
         return [_serialize(a) for a in articles], status
+
+    # --- Rebalance + takeaways -------------------------------------------
+
+    def _rebalance_row(row):
+        fill_width = f"{min(row['current_pct'], 100):.1f}%"
+        return html.Div(
+            [
+                html.Div(row["bucket"], className="rebalance-bucket"),
+                html.Div(
+                    [
+                        html.Div(className=f"rebalance-bar-fill {row['status']}", style={"width": fill_width}),
+                        html.Div(className="rebalance-bar-target", style={"left": f"{row['target_pct']}%"}),
+                    ],
+                    className="rebalance-bar",
+                ),
+                html.Div(
+                    f"{row['current_pct']:.0f}% now · {row['target_pct']}% target",
+                    className="rebalance-numbers muted",
+                ),
+                html.Span(row["action"], className=f"action-chip action-{row['status']}"),
+            ],
+            className="rebalance-row",
+        )
+
+    def _takeaway(level, text):
+        return html.Div(
+            [html.Span(className=f"takeaway-dot level-{level}"), html.Span(text)],
+            className="takeaway",
+        )
+
+    # Correlation needs a price download; keep it for 15 minutes per ticker set.
+    _corr_cache = {"key": None, "pairs": [], "at": None}
+
+    def _correlated_pairs_cached(tickers):
+        key = tuple(sorted(set(tickers)))
+        now = datetime.now(timezone.utc)
+        if _corr_cache["key"] == key and _corr_cache["at"] and now - _corr_cache["at"] < timedelta(minutes=15):
+            return _corr_cache["pairs"]
+        try:
+            prices = get_historical_prices(list(key), period="6mo")
+            pairs = insights.correlated_pairs(prices.pct_change().dropna()) if not prices.empty else []
+        except Exception:
+            pairs = []
+        _corr_cache.update(key=key, pairs=pairs, at=now)
+        return pairs
+
+    def _top_headline(tickers):
+        try:
+            articles = fetch_portfolio_news(tickers, per_ticker=1, max_items=1)
+        except NewsFetchError:
+            return None
+        return articles[0] if articles else None
+
+    @dash.callback(
+        Output("rebalance-rows", "children"),
+        Input("portfolio-table", "data"),
+    )
+    def render_rebalance(_table_data):
+        holdings = insights.prepare_holdings(load_data())
+        return [_rebalance_row(row) for row in insights.rebalance_plan(holdings)]
+
+    @dash.callback(
+        Output("takeaways-list", "children"),
+        Output("takeaways-stamp", "children"),
+        Input("portfolio-table", "data"),
+    )
+    def render_takeaways(_table_data):
+        holdings = insights.prepare_holdings(load_data())
+        rows = insights.rebalance_plan(holdings)
+        tickers = holdings["ticker"].tolist()
+        pairs = _correlated_pairs_cached(tickers) if tickers else []
+        headline = _top_headline(tickers) if tickers else None
+        items = insights.takeaways(holdings, rows, pairs, headline)
+        return [_takeaway(level, text) for level, text in items], f"as of {datetime.now():%H:%M}"
 
     @dash.callback(
         Output("portfolio-inline-news-feed", "children"),
