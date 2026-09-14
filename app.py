@@ -3,8 +3,10 @@ import dash
 from dotenv import load_dotenv
 
 from Services.database import get_engine
+from Services.theme import register_template
 
 load_dotenv()
+register_template()
 
 
 engine = get_engine()

@@ -10,7 +10,8 @@ import plotly.graph_objects as go
 from Services.updater import update_prices
 from Services.helper import load_data
 from Services.database import DB_PATH
-from Services.news import fetch_portfolio_news
+from Services.news import NewsFetchError, describe_fetch, fetch_portfolio_news
+from Services import theme
 
 
 def make_big_pie(df):
@@ -21,9 +22,12 @@ def make_big_pie(df):
             names="ticker",
             title="Portfolio Market Value Distribution",
         )
-    fig=px.pie(df,values="market_value_num",names="ticker",title="Portfolio Market Value Distribution",color_discrete_sequence=px.colors.sequential.Purples_r)
-    fig.update_traces(textposition='inside', textinfo='percent+label')
-    fig.update_layout(title={"text":"Portfolio Market Value Distribution","x":0.5,"xanchor":"center","y":0.95})
+    fig=px.pie(df,values="market_value_num",names="ticker",title="Portfolio Market Value Distribution",hole=0.45)
+    fig.update_traces(
+        textposition='inside',
+        textinfo='percent+label',
+        marker={"line": {"color": "rgba(2, 6, 23, 0.6)", "width": 1.5}},
+    )
     return fig
 
 
@@ -58,29 +62,33 @@ def make_holding_type_chart(df):
             y="percentage",
             title="Portfolio Allocation by Holding Type",
             color="holding_type",
-            color_discrete_map={
-                "Core": "#4CAF50",
-                "High Conviction": "#FFC107",
-                "Moonshot": "#F44336",
-            },
+            color_discrete_map=theme.HOLDING_TYPE_COLORS,
         )
 
         targets={
             "Core": 60,
             "High Conviction": 30,
             "Moonshot": 10}
-        
+
+        # One short target line per category, drawn in category coordinates
+        # so it sits exactly over its bar regardless of chart width.
+        categories = list(targets.keys())
+        fig.update_xaxes(categoryorder="array", categoryarray=categories, title=None)
+        for i, name in enumerate(categories):
+            fig.add_shape(
+                type="line",
+                x0=i - 0.4, x1=i + 0.4, y0=targets[name], y1=targets[name],
+                xref="x", yref="y",
+                line=dict(color=theme.TEXT_STRONG, width=2, dash="dot"),
+            )
+        # legend entry for the target lines
         fig.add_trace(go.Scatter(
-            x=list(targets.keys()),
-            y=list(targets.values()),
-            mode="markers",
-            marker=dict(color="red", size=258, symbol="line-ew",line=dict(width=2)),name="Target"))
+            x=[None], y=[None], mode="lines",
+            line=dict(color=theme.TEXT_STRONG, width=2, dash="dot"), name="Target"))
 
-
-   
-        fig.update_yaxes(range=[0, 100], ticksuffix="%",tickformat=".0f")
-
-        fig.update_yaxes(ticksuffix="%", separatethousands=True)
+        fig.update_traces(width=0.6, selector={"type": "bar"})
+        fig.update_layout(barmode="overlay", legend_title_text=None)
+        fig.update_yaxes(range=[0, 100], ticksuffix="%", tickformat=".0f", title="Allocation")
         return fig
 
 
@@ -219,44 +227,92 @@ def modify_portfolio(action, ticker, shares=None, avg_price=None, holding_type=N
 
 
 dash.register_page(__name__, path="/", name="Portfolio", title="Portfolio")
+
+TABLE_BORDER = "1px solid rgba(148, 163, 184, 0.14)"
+
 layout = html.Div([
-    
+
     html.Div([
-        dcc.Input(id="ticker-input", type="text", placeholder="Ticker (e.g. AAPL)"),
-        dcc.Input(id="shares-input", type="number", placeholder="Shares", min=1),
-        dcc.Input(id="avgprice-input", type="number", placeholder="Price", min=0),
-        html.Button("Add Ticker", id="add-btn", n_clicks=0, style={"marginRight": "10px"}),
-        html.Button("Remove Ticker", id="remove-btn", n_clicks=0)]),
-        
-        #drop down for categorisation
-        dcc.Dropdown(
-        id="holding-type-input",
-        options=[
-            {"label": "Core Holding", "value": "Core"},
-            {"label": "High Conviction", "value": "High Conviction"},
-            {"label": "Moonshot", "value": "Moonshot"},
-        ],
-        placeholder="Holding type",
-        clearable=False,
-        style={"width": "200px", "marginRight": "10px"}
-    ),
+        html.Div("Overview", className="page-eyebrow"),
+        html.H2("Portfolio", className="page-title"),
+        html.P("Holdings, allocation and the headlines that move them.", className="page-subtitle"),
+    ], className="page-header"),
 
+    # Add / remove controls
+    html.Div([
+        html.Div("Manage holdings", className="card-title"),
+        html.Div([
+            dcc.Input(id="ticker-input", type="text", placeholder="Ticker (e.g. AAPL)"),
+            dcc.Input(id="shares-input", type="number", placeholder="Shares", min=1),
+            dcc.Input(id="avgprice-input", type="number", placeholder="Price", min=0),
+            #drop down for categorisation
+            dcc.Dropdown(
+                id="holding-type-input",
+                options=[
+                    {"label": "Core Holding", "value": "Core"},
+                    {"label": "High Conviction", "value": "High Conviction"},
+                    {"label": "Moonshot", "value": "Moonshot"},
+                ],
+                placeholder="Holding type",
+                clearable=False,
+            ),
+            html.Button("Add Ticker", id="add-btn", n_clicks=0),
+            html.Button("Remove Ticker", id="remove-btn", n_clicks=0, className="secondary"),
+        ], className="toolbar"),
+    ], className="card"),
 
+    # Holdings table
+    html.Div([
+        html.Div("Holdings", className="card-title"),
+        dash_table.DataTable(
+            id="portfolio-table",
+            columns=[{"name": i, "id": i, "type": "text"} for i in load_data().columns if i != "id"],
+            data=[],
+            style_table={"overflowX": "auto"},
+            style_cell={
+                "backgroundColor": "transparent",
+                "color": theme.TEXT,
+                "border": TABLE_BORDER,
+                "padding": "10px 12px",
+                "fontFamily": "Inter, Segoe UI, sans-serif",
+                "fontSize": "14px",
+                "textAlign": "left",
+            },
+            style_header={
+                "backgroundColor": "rgba(16, 185, 129, 0.14)",
+                "color": theme.TEXT_STRONG,
+                "fontWeight": "700",
+                "textTransform": "uppercase",
+                "fontSize": "12px",
+                "letterSpacing": "0.06em",
+                "border": TABLE_BORDER,
+            },
+            style_data_conditional=[
+                {"if": {"row_index": "odd"}, "backgroundColor": "rgba(148, 163, 184, 0.04)"},
+                {"if": {"column_id": "ticker"}, "color": theme.ACCENT_BRIGHT, "fontWeight": "700"},
+                {"if": {"column_id": "Total_Profit_Loss"}, "color": theme.POSITIVE, "fontWeight": "600"},
+                {
+                    "if": {"filter_query": "{Total_Profit_Loss} contains '-'", "column_id": "Total_Profit_Loss"},
+                    "color": theme.NEGATIVE,
+                },
+                {
+                    "if": {"filter_query": "{ticker} = 'TOTAL'"},
+                    "fontWeight": "700",
+                    "color": theme.TEXT_STRONG,
+                    "backgroundColor": "rgba(16, 185, 129, 0.08)",
+                    "borderTop": "1px solid rgba(52, 211, 153, 0.5)",
+                },
+            ],
+            css=[{"selector": ".dash-spreadsheet-inner *", "rule": "background: transparent !important;"}],
+        ),
+    ], className="card"),
 
-    dash_table.DataTable(
-        id="portfolio-table",
-        hidden_columns=["id"],
-        columns=[{"name": i, "id": i, "type": "text"} for i in load_data().columns],
-        data=[],
-        style_data_conditional=[{"if": {"filter_query": "{ticker} = 'TOTAL'"},
-                                    "fontWeight": "bold",
-                                    "backgroundColor": "#f7f8fc"}],
-                                    
-    style_header={"backgroundColor":"#EA84FC","fontWeight": "bold","color":'black'}
+    # Charts
+    html.Div([
+        html.Div(dcc.Graph(id="value-chart"), className="card"),
+        html.Div(dcc.Graph(id="holding-type-chart"), className="card"),
+    ], className="section-grid two"),
 
-    ),
-    dcc.Graph(id="value-chart"),
-    dcc.Graph(id="holding-type-chart"),
     dcc.Interval(
         id="interval-component",
         interval=60 * 1000,
@@ -264,16 +320,17 @@ layout = html.Div([
     ),
 
     # Stock news section
-    html.Hr(style={"margin": "28px 0 20px"}),
-    html.Div(
-        [
-            html.H3("Stock News", style={"margin": "0", "fontSize": "18px"}),
-            html.Button("Refresh News", id="portfolio-news-btn", n_clicks=0),
-        ],
-        style={"display": "flex", "justifyContent": "space-between", "alignItems": "center", "marginBottom": "8px"},
-    ),
-    html.Div(id="portfolio-inline-news-status", style={"fontSize": "13px", "color": "#64748b", "marginBottom": "12px"}),
-    html.Div(id="portfolio-inline-news-feed", className="news-feed"),
+    html.Div([
+        html.Div(
+            [
+                html.H3("Stock News", className="card-title"),
+                html.Button("Refresh News", id="portfolio-news-btn", n_clicks=0, className="secondary"),
+            ],
+            className="card-header",
+        ),
+        html.Div(id="portfolio-inline-news-status", className="muted", style={"marginBottom": "12px"}),
+        html.Div(id="portfolio-inline-news-feed", className="news-feed"),
+    ], className="card"),
     dcc.Store(id="portfolio-inline-news-data"),
 ])
 
@@ -436,9 +493,8 @@ if not hasattr(dash, "_portfolio_inline_news_registered"):
         Output("portfolio-inline-news-data", "data"),
         Output("portfolio-inline-news-status", "children"),
         Input("portfolio-news-btn", "n_clicks"),
-        Input("interval-component", "n_intervals"),
     )
-    def fetch_inline_news(n_clicks, n_intervals):
+    def fetch_inline_news(n_clicks):
         holdings = load_data()
         if holdings.empty:
             return [], "No holdings found."
@@ -448,13 +504,15 @@ if not hasattr(dash, "_portfolio_inline_news_registered"):
         tickers = [t for t in tickers if t]
         if not tickers:
             return [], "No holdings found."
+        # Page load is served from cache when fresh; the button forces a live fetch.
+        force = dash.ctx.triggered_id == "portfolio-news-btn"
         try:
-            articles = fetch_portfolio_news(tickers, per_ticker=5, max_items=9)
-        except Exception:
-            return [], "Could not fetch news right now — check your NEWS_API_KEY."
+            articles = fetch_portfolio_news(tickers, per_ticker=5, max_items=9, force=force)
+        except NewsFetchError as exc:
+            return [], f"Could not fetch news: {exc}"
         if not articles:
-            return [], "No recent news found for your holdings."
-        status = f"{len(articles)} recent headlines across {len({a['ticker'] for a in articles})} holdings."
+            return [], f"No recent news found for your holdings. {describe_fetch()}"
+        status = f"{len(articles)} recent headlines across {len({a['ticker'] for a in articles})} holdings. {describe_fetch()}"
         return [_serialize(a) for a in articles], status
 
     @dash.callback(
@@ -466,6 +524,7 @@ if not hasattr(dash, "_portfolio_inline_news_registered"):
         if not articles:
             return html.Div(
                 "Click 'Refresh News' to load the latest headlines for your holdings.",
-                style={"color": "#94a3b8", "padding": "12px 0"},
+                className="muted",
+                style={"padding": "12px 0"},
             )
         return [_inline_news_card(a) for a in articles]

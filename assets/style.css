@@ -1,98 +1,420 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+
+/* =========================================================
+   Theme tokens — dark slate + emerald
+   Mirrors Services/theme.py; keep the two in sync.
+   ========================================================= */
+:root {
+    --bg-0: #070b14;
+    --bg-1: #0f172a;
+    --bg-2: #1e293b;
+    --card: rgba(15, 23, 42, 0.72);
+    --card-solid: #111a2e;
+    --border: rgba(148, 163, 184, 0.16);
+    --border-strong: rgba(148, 163, 184, 0.32);
+    --text: #e2e8f0;
+    --text-strong: #f8fafc;
+    --muted: #94a3b8;
+    --accent: #10b981;
+    --accent-bright: #34d399;
+    --accent-soft: rgba(16, 185, 129, 0.14);
+    --accent-glow: rgba(16, 185, 129, 0.35);
+    --positive: #34d399;
+    --negative: #fb7185;
+    --warning: #fbbf24;
+    --radius: 14px;
+    --radius-sm: 8px;
+    --shadow: 0 20px 40px rgba(2, 6, 23, 0.45);
+    --shadow-hover: 0 28px 56px rgba(2, 6, 23, 0.6);
+}
+
 /* Global */
+html {
+    background: var(--bg-0);
+}
+
 body {
     font-family: "Inter", "Segoe UI", sans-serif;
-    background-color: #f4f7fb;
+    color: var(--text);
     margin: 0;
     padding: 24px;
-    color: #1e293b;
+    min-height: 100vh;
+    background:
+        radial-gradient(900px 520px at 12% -10%, var(--accent-glow), transparent 60%),
+        radial-gradient(700px 480px at 92% 8%, rgba(56, 189, 248, 0.16), transparent 60%),
+        linear-gradient(180deg, var(--bg-1) 0%, var(--bg-0) 100%);
+    background-attachment: fixed;
+}
+
+a {
+    color: var(--accent-bright);
+}
+
+hr {
+    border: none;
+    border-top: 1px solid var(--border);
 }
 
 /* Title */
 .main-title {
     text-align: center;
     font-size: 40px;
-    font-weight: 700;
-    color: #1d4ed8;
-    margin-bottom: 30px;
+    font-weight: 800;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    margin: 4px 0 18px;
+    background: linear-gradient(90deg, var(--text-strong) 0%, var(--accent-bright) 55%, #38bdf8 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
 }
 
-
-/*Subtitle */
+/* Subtitle */
 .subtitle {
-    color: #1d4ed8;
-    font-weight: 600;
-    font-size: 26px;
-    margin-bottom: 20px;
-    text-align:center;
+    color: var(--text-strong);
+    font-weight: 700;
+    font-size: 24px;
+    margin-bottom: 18px;
+    text-align: center;
 }
 
-
-/* Navbar */
+/* Navbar — pill tabs */
 .navbar {
-    margin-bottom: 30px;
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 6px;
+    width: fit-content;
+    max-width: 100%;
+    margin: 0 auto 30px;
+    padding: 6px;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    background: var(--card);
+    box-shadow: var(--shadow);
+    backdrop-filter: blur(14px);
 }
 
-/* Navigation links */
 .nav-link {
-    margin-right: 25px;
-    color: #2563eb;
+    padding: 8px 16px;
+    border-radius: 999px;
+    color: var(--muted);
     font-weight: 600;
+    font-size: 14px;
     text-decoration: none;
-    font-size: 16px;
+    transition: color 140ms ease, background 140ms ease;
 }
 
 .nav-link:hover {
-    color: #1e40af;
+    color: var(--text-strong);
+    background: var(--accent-soft);
+}
+
+/* Page header inside a tab */
+.page-header {
+    margin-bottom: 18px;
+}
+
+.page-eyebrow {
+    color: var(--accent-bright);
+    font-size: 12px;
+    font-weight: 800;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+}
+
+.page-title {
+    margin: 4px 0 2px;
+    color: var(--text-strong);
+    font-size: 28px;
+    font-weight: 800;
+}
+
+.page-subtitle {
+    margin: 0;
+    color: var(--muted);
+    font-size: 15px;
+}
+
+/* Cards */
+.card {
+    padding: 20px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background:
+        linear-gradient(160deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0) 45%),
+        var(--card);
+    box-shadow: var(--shadow);
+    backdrop-filter: blur(14px);
+}
+
+.card + .card,
+.section-grid + .card,
+.card + .section-grid {
+    margin-top: 18px;
+}
+
+.card-title {
+    margin: 0 0 14px;
+    color: var(--text-strong);
+    font-size: 16px;
+    font-weight: 700;
+}
+
+.card-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 14px;
+}
+
+.card-header .card-title {
+    margin: 0;
+}
+
+.section-grid {
+    display: grid;
+    gap: 18px;
+}
+
+.section-grid.two {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.muted {
+    color: var(--muted);
+    font-size: 13px;
+}
+
+/* Metric tiles (Analytics, Covariance, Monte Carlo) */
+.metric-card {
+    flex: 1;
+    min-width: 160px;
+    padding: 14px 16px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--card);
+    backdrop-filter: blur(14px);
+}
+
+.metric-title {
+    margin-bottom: 6px;
+    color: var(--muted);
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+}
+
+.metric-value {
+    color: var(--text-strong);
+    font-size: 22px;
+    font-weight: 800;
+    line-height: 1.1;
+}
+
+/* Plain text panel (insights, explanations) */
+.panel {
+    padding: 14px 16px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: rgba(2, 6, 23, 0.35);
+    line-height: 1.5;
+}
+
+.panel h4 {
+    margin-top: 0;
+    color: var(--text-strong);
+}
+
+/* Toolbar (inputs + buttons on one row) */
+.toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px;
+}
+
+.toolbar .dash-dropdown {
+    min-width: 200px;
+}
+
+/* Inputs */
+input[type="text"],
+input[type="search"],
+input[type="number"] {
+    height: 40px;
+    box-sizing: border-box;
+    padding: 0 12px;
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-sm);
+    color: var(--text-strong);
+    background: rgba(2, 6, 23, 0.45);
+    font: inherit;
+    font-size: 14px;
+    outline: none;
+    transition: border-color 140ms ease, box-shadow 140ms ease;
+}
+
+input[type="text"]::placeholder,
+input[type="search"]::placeholder,
+input[type="number"]::placeholder {
+    color: var(--muted);
+}
+
+input[type="text"]:focus,
+input[type="search"]:focus,
+input[type="number"]:focus {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px var(--accent-soft);
 }
 
 /* Buttons */
 button {
-    background-color: #2563eb;
-    color: white;
-    border: none;
-    padding: 8px 14px;
-    border-radius: 6px;
+    height: 40px;
+    padding: 0 16px;
+    border: 1px solid transparent;
+    border-radius: var(--radius-sm);
+    color: #052e22;
+    background: linear-gradient(180deg, var(--accent-bright), var(--accent));
+    font: inherit;
+    font-size: 14px;
+    font-weight: 700;
     cursor: pointer;
-    font-weight: 500;
+    box-shadow: 0 8px 18px rgba(16, 185, 129, 0.28);
+    transition: transform 120ms ease, box-shadow 120ms ease, filter 120ms ease;
 }
 
 button:hover {
-    background-color: #1e40af;
+    filter: brightness(1.06);
+    transform: translateY(-1px);
+    box-shadow: 0 12px 24px rgba(16, 185, 129, 0.36);
 }
 
-/* Dash Table Header */
-.dash-table-container .dash-spreadsheet-container .dash-header {
-    background-color: #2563eb !important;
-    color: white !important;
-    font-weight: 600;
+button:active {
+    transform: translateY(0);
 }
 
-/* Portfolio News */
+button.secondary {
+    color: var(--text);
+    background: rgba(148, 163, 184, 0.08);
+    border-color: var(--border-strong);
+    box-shadow: none;
+}
+
+button.secondary:hover {
+    background: rgba(148, 163, 184, 0.16);
+    box-shadow: none;
+}
+
+/* Dropdown (dcc.Dropdown / react-select v1) */
+.Select-control {
+    height: 40px;
+    border: 1px solid var(--border-strong) !important;
+    border-radius: var(--radius-sm) !important;
+    background: rgba(2, 6, 23, 0.45) !important;
+    color: var(--text-strong);
+    box-shadow: none !important;
+}
+
+.is-focused:not(.is-open) > .Select-control,
+.is-open > .Select-control {
+    border-color: var(--accent) !important;
+    box-shadow: 0 0 0 3px var(--accent-soft) !important;
+}
+
+.Select-placeholder,
+.Select--single > .Select-control .Select-value .Select-value-label,
+.Select-input > input {
+    color: var(--text-strong) !important;
+    line-height: 38px;
+}
+
+.Select-placeholder {
+    color: var(--muted) !important;
+}
+
+.Select-arrow {
+    border-top-color: var(--muted) !important;
+}
+
+.Select-menu-outer {
+    border: 1px solid var(--border-strong) !important;
+    border-radius: var(--radius-sm) !important;
+    background: var(--card-solid) !important;
+    box-shadow: var(--shadow) !important;
+    overflow: hidden;
+}
+
+.Select-option,
+.VirtualizedSelectOption {
+    color: var(--text) !important;
+    background: transparent !important;
+}
+
+.Select-option.is-focused,
+.VirtualizedSelectFocusedOption {
+    background: var(--accent-soft) !important;
+    color: var(--text-strong) !important;
+}
+
+.Select-option.is-selected,
+.VirtualizedSelectSelectedOption {
+    color: var(--accent-bright) !important;
+    font-weight: 700;
+}
+
+/* Dash DataTable — colors come from style_* props in the page;
+   this only smooths the frame. */
+.dash-table-container .dash-spreadsheet-container .dash-spreadsheet-inner {
+    border-radius: var(--radius-sm);
+    overflow: hidden;
+}
+
+.dash-table-container .dash-spreadsheet-container .dash-spreadsheet-inner table {
+    border-collapse: collapse;
+}
+
+/* Graphs */
+.js-plotly-plot .plotly .modebar {
+    opacity: 0.35;
+    transition: opacity 140ms ease;
+}
+
+.js-plotly-plot:hover .plotly .modebar {
+    opacity: 1;
+}
+
+/* =========================================================
+   News (Portfolio inline feed + Daily Brief)
+   ========================================================= */
 .news-hero {
     display: flex;
     align-items: flex-end;
     justify-content: space-between;
     gap: 20px;
     padding: 24px;
-    border: 1px solid #d8e2f0;
-    border-radius: 8px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
     background:
-        linear-gradient(135deg, rgba(255, 255, 255, 0.94), rgba(239, 246, 255, 0.9)),
-        linear-gradient(90deg, #dbeafe, #f8fafc);
-    box-shadow: 0 12px 28px rgba(15, 23, 42, 0.08);
+        radial-gradient(520px 200px at 0% 0%, var(--accent-soft), transparent 70%),
+        var(--card);
+    box-shadow: var(--shadow);
+    backdrop-filter: blur(14px);
 }
 
 .news-eyebrow {
-    color: #2563eb;
-    font-size: 13px;
+    color: var(--accent-bright);
+    font-size: 12px;
     font-weight: 800;
-    letter-spacing: 0;
+    letter-spacing: 0.12em;
     text-transform: uppercase;
 }
 
 .news-heading {
     margin: 6px 0;
-    color: #0f172a;
+    color: var(--text-strong);
     font-size: 32px;
     line-height: 1.15;
 }
@@ -100,7 +422,7 @@ button:hover {
 .news-subheading {
     max-width: 640px;
     margin: 0;
-    color: #475569;
+    color: var(--muted);
     font-size: 16px;
 }
 
@@ -112,7 +434,7 @@ button:hover {
 
 .news-status {
     margin: 14px 0;
-    color: #475569;
+    color: var(--muted);
     font-size: 14px;
 }
 
@@ -125,13 +447,13 @@ button:hover {
 
 .news-metric {
     padding: 14px 16px;
-    border: 1px solid #dbe3ee;
-    border-radius: 8px;
-    background: white;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--card);
 }
 
 .news-metric-value {
-    color: #0f172a;
+    color: var(--text-strong);
     font-size: 22px;
     font-weight: 800;
     line-height: 1.1;
@@ -139,7 +461,7 @@ button:hover {
 
 .news-metric-label {
     margin-top: 4px;
-    color: #64748b;
+    color: var(--muted);
     font-size: 12px;
     font-weight: 700;
     text-transform: uppercase;
@@ -155,43 +477,30 @@ button:hover {
 
 .news-search {
     width: 100%;
-    height: 40px;
-    box-sizing: border-box;
-    padding: 0 12px;
-    border: 1px solid #cbd5e1;
-    border-radius: 6px;
-    color: #0f172a;
-    background: white;
-}
-
-.news-dropdown .Select-control {
-    border-color: #cbd5e1;
-    border-radius: 6px;
-    min-height: 40px;
 }
 
 .news-segmented {
     display: inline-flex;
     height: 40px;
     overflow: hidden;
-    border: 1px solid #cbd5e1;
-    border-radius: 6px;
-    background: white;
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-sm);
+    background: rgba(2, 6, 23, 0.45);
 }
 
 .news-segmented-label {
     display: inline-flex;
     align-items: center;
     padding: 0 12px;
-    color: #475569;
+    color: var(--muted);
     font-size: 13px;
     font-weight: 700;
     cursor: pointer;
 }
 
 .news-segmented-label:has(input:checked) {
-    color: white;
-    background: #2563eb;
+    color: #052e22;
+    background: var(--accent-bright);
 }
 
 .news-segmented-input {
@@ -201,13 +510,14 @@ button:hover {
 .news-spotlight {
     margin-bottom: 14px;
     padding: 18px;
-    border-left: 4px solid #2563eb;
-    border-radius: 8px;
-    background: #eff6ff;
+    border: 1px solid var(--border);
+    border-left: 4px solid var(--accent);
+    border-radius: var(--radius-sm);
+    background: var(--accent-soft);
 }
 
 .news-spotlight-label {
-    color: #1d4ed8;
+    color: var(--accent-bright);
     font-size: 12px;
     font-weight: 800;
     text-transform: uppercase;
@@ -216,7 +526,7 @@ button:hover {
 .news-spotlight-title {
     display: block;
     margin-top: 6px;
-    color: #0f172a;
+    color: var(--text-strong);
     font-size: 20px;
     font-weight: 800;
     line-height: 1.3;
@@ -225,7 +535,7 @@ button:hover {
 
 .news-spotlight-title:hover,
 .news-title:hover {
-    color: #2563eb;
+    color: var(--accent-bright);
 }
 
 .news-spotlight-meta,
@@ -233,13 +543,13 @@ button:hover {
     display: flex;
     flex-wrap: wrap;
     gap: 6px 10px;
-    color: #64748b;
+    color: var(--muted);
     font-size: 13px;
 }
 
 .news-spotlight-text {
     margin: 8px 0 0;
-    color: #334155;
+    color: var(--text);
 }
 
 .news-feed {
@@ -253,17 +563,16 @@ button:hover {
     flex-direction: column;
     min-height: 260px;
     padding: 16px;
-    border: 1px solid #dbe3ee;
-    border-radius: 8px;
-    background: white;
-    box-shadow: 0 8px 20px rgba(15, 23, 42, 0.06);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: rgba(2, 6, 23, 0.35);
     transition: transform 160ms ease, box-shadow 160ms ease, border-color 160ms ease;
 }
 
 .news-card:hover {
     transform: translateY(-3px);
-    border-color: #93c5fd;
-    box-shadow: 0 14px 30px rgba(15, 23, 42, 0.12);
+    border-color: var(--accent);
+    box-shadow: var(--shadow-hover);
 }
 
 .news-card-topline,
@@ -275,8 +584,9 @@ button:hover {
 }
 
 .news-ticker {
-    color: #1d4ed8;
+    color: var(--accent-bright);
     font-weight: 800;
+    letter-spacing: 0.04em;
 }
 
 .news-impact {
@@ -287,24 +597,24 @@ button:hover {
 }
 
 .news-impact-high-impact {
-    color: #991b1b;
-    background: #fee2e2;
+    color: #fecdd3;
+    background: rgba(251, 113, 133, 0.18);
 }
 
 .news-impact-watch {
-    color: #854d0e;
-    background: #fef3c7;
+    color: #fde68a;
+    background: rgba(251, 191, 36, 0.18);
 }
 
 .news-impact-latest {
-    color: #166534;
-    background: #dcfce7;
+    color: #a7f3d0;
+    background: var(--accent-soft);
 }
 
 .news-title {
     display: block;
     margin-top: 10px;
-    color: #0f172a;
+    color: var(--text-strong);
     font-size: 18px;
     font-weight: 800;
     line-height: 1.35;
@@ -313,13 +623,13 @@ button:hover {
 
 .news-description {
     margin: 10px 0;
-    color: #334155;
+    color: var(--text);
     line-height: 1.45;
 }
 
 .news-why {
     margin-top: auto;
-    color: #334155;
+    color: var(--text);
     font-size: 14px;
     line-height: 1.45;
 }
@@ -329,37 +639,42 @@ button:hover {
 }
 
 .news-action {
-    color: #2563eb;
+    color: var(--accent-bright);
     font-weight: 800;
     text-decoration: none;
 }
 
 .news-score {
-    color: #64748b;
+    color: var(--muted);
     font-size: 12px;
     font-weight: 700;
 }
 
 .news-empty-state {
     padding: 28px;
-    border: 1px dashed #cbd5e1;
-    border-radius: 8px;
-    background: white;
+    border: 1px dashed var(--border-strong);
+    border-radius: var(--radius-sm);
+    background: rgba(2, 6, 23, 0.35);
     text-align: center;
 }
 
 .news-empty-title {
-    color: #0f172a;
+    color: var(--text-strong);
     font-size: 18px;
     font-weight: 800;
 }
 
 .news-empty-message {
     margin-top: 6px;
-    color: #64748b;
+    color: var(--muted);
 }
 
+/* Responsive */
 @media (max-width: 900px) {
+    .section-grid.two {
+        grid-template-columns: 1fr;
+    }
+
     .news-hero {
         align-items: flex-start;
         flex-direction: column;
@@ -374,6 +689,10 @@ button:hover {
 @media (max-width: 640px) {
     body {
         padding: 14px;
+    }
+
+    .main-title {
+        font-size: 30px;
     }
 
     .news-heading {

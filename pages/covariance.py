@@ -26,17 +26,10 @@ dash.register_page(
 def _metric_card(title, value_id):
     return html.Div(
         [
-            html.Div(title, style={"fontWeight": "bold", "marginBottom": "4px"}),
-            html.Div("--", id=value_id, style={"fontSize": "18px"}),
+            html.Div(title, className="metric-title"),
+            html.Div("--", id=value_id, className="metric-value"),
         ],
-        style={
-            "flex": "1",
-            "minWidth": "220px",
-            "padding": "10px",
-            "border": "1px solid #e5e5e5",
-            "borderRadius": "8px",
-            "backgroundColor": "#fafafa",
-        },
+        className="metric-card",
     )
 
 
@@ -176,12 +169,7 @@ def _empty_insights(message):
             html.H4("Correlation Insights", style={"marginBottom": "8px"}),
             html.Div(message),
         ],
-        style={
-            "padding": "12px",
-            "border": "1px solid #e5e5e5",
-            "borderRadius": "8px",
-            "backgroundColor": "#fafafa",
-        },
+        className="panel",
     )
 
 
@@ -228,12 +216,7 @@ def _build_correlation_insights(corr):
             html.H4("Correlation Insights", style={"marginBottom": "8px"}),
             html.Ul(insight_items, style={"margin": "0", "paddingLeft": "20px"}),
         ],
-        style={
-            "padding": "12px",
-            "border": "1px solid #e5e5e5",
-            "borderRadius": "8px",
-            "backgroundColor": "#fafafa",
-        },
+        className="panel",
     )
 
 

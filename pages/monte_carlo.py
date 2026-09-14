@@ -7,6 +7,7 @@ import yfinance as yf
 
 from pages.covariance import _metric_card
 from Services.helper import load_data
+from Services import theme
 
 
 TRADING_DAYS_PER_YEAR = 252
@@ -50,7 +51,6 @@ def _empty_figure(title, message):
         ],
         xaxis={"visible": False},
         yaxis={"visible": False},
-        template="plotly_white",
     )
     return fig
 
@@ -238,7 +238,7 @@ def _build_projection_chart(years_axis, path_values):
             x=years_axis,
             y=percentile_50,
             mode="lines",
-            line={"color": "#1d4ed8", "width": 3},
+            line={"color": theme.ACCENT_BRIGHT, "width": 3},
             name="Median path",
         )
     )
@@ -246,7 +246,6 @@ def _build_projection_chart(years_axis, path_values):
         title="Projected Portfolio Value Paths",
         xaxis_title="Years",
         yaxis_title="Portfolio Value",
-        template="plotly_white",
         legend={"orientation": "h", "y": 1.1},
     )
     fig.update_yaxes(tickprefix="$", separatethousands=True)
@@ -259,11 +258,11 @@ def _build_distribution_chart(final_values, initial_value):
         go.Histogram(
             x=final_values,
             nbinsx=40,
-            marker={"color": "#60a5fa"},
+            marker={"color": "#38bdf8"},
             name="Ending values",
         )
     )
-    for percentile, color in ((5, "#dc2626"), (50, "#1d4ed8"), (95, "#16a34a")):
+    for percentile, color in ((5, theme.NEGATIVE), (50, theme.TEXT_STRONG), (95, theme.POSITIVE)):
         value = float(np.percentile(final_values, percentile))
         fig.add_vline(
             x=value,
@@ -277,7 +276,7 @@ def _build_distribution_chart(final_values, initial_value):
     fig.add_vline(
         x=float(initial_value),
         line_width=2,
-        line_color="#475569",
+        line_color=theme.MUTED,
         annotation_text=f"Today: {_format_currency(initial_value)}",
         annotation_position="bottom right",
     )
@@ -285,7 +284,6 @@ def _build_distribution_chart(final_values, initial_value):
         title="Distribution of Ending Portfolio Values",
         xaxis_title="Ending Value",
         yaxis_title="Simulation Count",
-        template="plotly_white",
     )
     fig.update_xaxes(tickprefix="$", separatethousands=True)
     return fig
@@ -316,12 +314,7 @@ def _build_explanation(current_value, median_value, downside_value, upside_value
                 f"assumed to continue at the same pace. It does not model trading, contributions, taxes, or regime changes."
             ),
         ],
-        style={
-            "padding": "14px",
-            "border": "1px solid #e5e7eb",
-            "borderRadius": "8px",
-            "backgroundColor": "#f8fafc",
-        },
+        className="panel",
     )
 
 

@@ -4,7 +4,7 @@ import dash
 from dash import Input, Output, dcc, html
 
 from Services.helper import load_data
-from Services.news import fetch_portfolio_news
+from Services.news import NewsFetchError, describe_fetch, fetch_portfolio_news
 
 
 MAX_NEWS_ITEMS = 18
@@ -254,22 +254,22 @@ if not hasattr(dash, "_portfolio_news_callback_registered"):
         if not tickers:
             return [], "No holdings found. Add tickers on the Portfolio page first.", []
 
+        all_options = [{"label": ticker, "value": ticker} for ticker in sorted(set(tickers))]
+        # Only the Refresh button bypasses the cache; navigation and the
+        # background interval are served from cache when it is still fresh.
+        force = dash.ctx.triggered_id == "portfolio-news-refresh-btn"
         try:
-            articles = fetch_portfolio_news(tickers, per_ticker=8, max_items=MAX_NEWS_ITEMS)
-        except Exception:
-            articles = []
+            articles = fetch_portfolio_news(tickers, per_ticker=8, max_items=MAX_NEWS_ITEMS, force=force)
+        except NewsFetchError as exc:
+            return [], f"Could not load news: {exc}", all_options
 
         if not articles:
-            return (
-                [],
-                "No recent news could be fetched right now. This usually means the news source returned nothing or the request failed.",
-                [{"label": ticker, "value": ticker} for ticker in sorted(set(tickers))],
-            )
+            return [], f"No headlines mentioned your holdings in the last 7 days. {describe_fetch()}", all_options
 
         covered_tickers = sorted({article["ticker"] for article in articles})
         status = (
             f"Showing {len(articles)} recent important headlines across {len(covered_tickers)} holdings. "
-            f"Covered tickers: {', '.join(covered_tickers)}."
+            f"Covered tickers: {', '.join(covered_tickers)}. {describe_fetch()}"
         )
         options = [{"label": ticker, "value": ticker} for ticker in covered_tickers]
         return [_serialize_article(article) for article in articles], status, options
@@ -287,7 +287,7 @@ if not hasattr(dash, "_portfolio_news_callback_registered"):
     def render_portfolio_news(data, search, ticker, impact_filter, sort_by):
         articles = [_deserialize_article(article) for article in (data or [])]
         if not articles:
-            return [], "", _empty_state("No headlines yet", "Refresh the page after adding portfolio holdings.")
+            return [], "", _empty_state("No headlines yet", "Headlines appear here once a refresh succeeds — see the status line above.")
 
         query = (search or "").strip().lower()
         filtered = []
