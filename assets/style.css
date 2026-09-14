@@ -475,6 +475,50 @@ hr {
     background: rgba(251, 191, 36, 0.18);
 }
 
+/* Verdict (diversification ratio) */
+.verdict-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.verdict-value {
+    color: var(--text-strong);
+    font-size: 28px;
+    font-weight: 800;
+    line-height: 1;
+}
+
+.verdict-chip {
+    padding: 4px 10px;
+    border-radius: 999px;
+    font-size: 12px;
+    font-weight: 800;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    vertical-align: middle;
+}
+
+.verdict-low {
+    color: #fecdd3;
+    background: rgba(251, 113, 133, 0.18);
+}
+
+.verdict-modest {
+    color: #fde68a;
+    background: rgba(251, 191, 36, 0.18);
+}
+
+.verdict-reasonable {
+    color: #bae6fd;
+    background: rgba(56, 189, 248, 0.18);
+}
+
+.verdict-strong {
+    color: #a7f3d0;
+    background: var(--accent-soft);
+}
+
 /* Plain text panel (insights, explanations) */
 .panel {
     padding: 14px 16px;

@@ -221,6 +221,84 @@ def _build_correlation_insights(corr):
     )
 
 
+# Diversification ratio = weighted average holding volatility / portfolio volatility.
+# 1.0 means the holdings give no offsetting benefit at all; upper bound, label, meaning.
+DIVERSIFICATION_BANDS = [
+    (1.15, "Low", "The portfolio behaves almost like a single position — holdings rise and fall together."),
+    (1.40, "Modest", "There is some offsetting between holdings, but most of the risk still moves as one block."),
+    (1.80, "Reasonable", "Holdings offset each other meaningfully; the portfolio is calmer than its parts."),
+    (float("inf"), "Strong", "Holdings are largely independent of each other — a well-spread book."),
+]
+CONCENTRATION_LIMIT = 0.25
+HIGH_AVG_CORRELATION = 0.5
+
+
+def _diversification_verdict(ratio):
+    for upper, label, meaning in DIVERSIFICATION_BANDS:
+        if ratio < upper:
+            return label, meaning
+    return DIVERSIFICATION_BANDS[-1][1], DIVERSIFICATION_BANDS[-1][2]
+
+
+def _verdict_chip(label):
+    return html.Span(label, className=f"verdict-chip verdict-{label.lower()}")
+
+
+def _build_diversification_insight(ratio, weights, corr, asset_vols_ann, portfolio_vol_ann):
+    label, meaning = _diversification_verdict(ratio)
+
+    weight_vec = weights.reindex(corr.index).fillna(0.0)
+    avg_vol = float(np.dot(weight_vec.to_numpy(), asset_vols_ann))
+    reduction_pct = (1 - portfolio_vol_ann / avg_vol) * 100 if avg_vol > 0 else 0.0
+
+    ranked = weight_vec.sort_values(ascending=False)
+    top_ticker, top_weight = ranked.index[0], float(ranked.iloc[0])
+    effective_positions = 1.0 / float((ranked ** 2).sum()) if float((ranked ** 2).sum()) > 0 else 0.0
+
+    off_diagonal = corr.values[~np.eye(len(corr), dtype=bool)]
+    avg_corr = float(np.nanmean(off_diagonal)) if off_diagonal.size else 0.0
+
+    bullets = [
+        f"Your holdings run at {avg_vol * 100:.1f}% volatility on average; combined, the portfolio runs at "
+        f"{portfolio_vol_ann * 100:.1f}% — diversification removes {reduction_pct:.0f}% of the standalone risk.",
+        f"Effective number of positions: {effective_positions:.1f} of {len(ranked)} — "
+        f"{top_ticker} alone is {top_weight * 100:.0f}% of the book.",
+        f"Average correlation between holdings: {avg_corr:.2f}.",
+    ]
+
+    if top_weight > CONCENTRATION_LIMIT:
+        lever = (
+            f"Biggest lever: trim {top_ticker}. At {top_weight * 100:.0f}% of the portfolio it caps the ratio "
+            "no matter how uncorrelated the other names are."
+        )
+    elif avg_corr > HIGH_AVG_CORRELATION:
+        lever = (
+            "Biggest lever: add positions that don't track the current ones — a different sector, region or "
+            "asset class. The existing names move together, so adding more of the same won't help."
+        )
+    else:
+        lever = "No structural issue: keep weights balanced as you add positions and the ratio will hold."
+
+    return html.Div(
+        [
+            html.H4("Diversification", style={"marginBottom": "8px"}),
+            html.Div(
+                [html.Span(f"{ratio:.2f}", className="verdict-value"), _verdict_chip(label)],
+                className="verdict-row",
+            ),
+            html.P(meaning, style={"margin": "8px 0"}),
+            html.Ul([html.Li(text) for text in bullets], style={"margin": "0 0 10px", "paddingLeft": "20px"}),
+            html.P(lever, style={"margin": "0 0 10px", "fontWeight": "600"}),
+            html.Div(
+                "Diversification ratio = weighted average holding volatility ÷ portfolio volatility. "
+                "1.0 means no benefit from combining the holdings; higher means they offset each other more.",
+                className="muted",
+            ),
+        ],
+        className="panel",
+    )
+
+
 def _build_covariance_outputs(holdings):
     default_portfolio, default_spy, default_div = _default_metrics()
 
@@ -285,6 +363,8 @@ def _build_covariance_outputs(holdings):
 
     portfolio_vol_ann = None
     diversification_ratio = None
+    weights = None
+    asset_vols_ann = None
     valid_tickers = returns.columns.tolist()
 
     if returns.shape[0] >= 2 and returns.shape[1] >= 1:
@@ -300,10 +380,11 @@ def _build_covariance_outputs(holdings):
 
         portfolio_vol_ann = sigma_portfolio_daily * np.sqrt(TRADING_DAYS_PER_YEAR)
 
+        asset_vols = np.sqrt(np.clip(np.diag(cov_values), 0.0, None))
+        asset_vols_ann = asset_vols * np.sqrt(TRADING_DAYS_PER_YEAR)
         if len(valid_tickers) == 1:
             diversification_ratio = 1.0
         elif sigma_portfolio_daily > 0:
-            asset_vols = np.sqrt(np.clip(np.diag(cov_values), 0.0, None))
             diversification_ratio = float(np.dot(weight_vec, asset_vols) / sigma_portfolio_daily)
 
     portfolio_metric, spy_metric, div_metric = _format_metric_texts(
@@ -311,6 +392,9 @@ def _build_covariance_outputs(holdings):
         spy_vol_ann,
         diversification_ratio,
     )
+    if diversification_ratio is not None:
+        verdict_label, _ = _diversification_verdict(diversification_ratio)
+        div_metric = [html.Span(div_metric, style={"marginRight": "10px"}), _verdict_chip(verdict_label)]
 
     used_count = len(valid_tickers)
     observations = returns.shape[0]
@@ -362,6 +446,16 @@ def _build_covariance_outputs(holdings):
     )
     fig.update_layout(title="Correlation Matrix (Daily Returns, 1Y)")
     insights = _build_correlation_insights(corr)
+    if diversification_ratio is not None and weights is not None and portfolio_vol_ann:
+        insights = html.Div(
+            [
+                _build_diversification_insight(
+                    diversification_ratio, weights, corr, asset_vols_ann, portfolio_vol_ann
+                ),
+                insights,
+            ],
+            style={"display": "grid", "gap": "12px"},
+        )
 
     return (
         html.Div(" ".join(status_parts)),
