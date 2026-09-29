@@ -284,7 +284,7 @@ hr {
 
 .cover-wordmark {
     margin: 18px 0 14px;
-    font-size: clamp(64px, 11vw, 136px);
+    font-size: clamp(24px, 8vw, 112px);
     font-weight: 800;
     line-height: 0.95;
     letter-spacing: 0.06em;
@@ -543,6 +543,18 @@ hr {
 
 .toolbar .dash-dropdown {
     min-width: 200px;
+}
+
+/* Card backdrop filters create separate stacking contexts. Raise the entire
+   controls card so its open dropdown paints above the holdings table. */
+.portfolio-controls {
+    position: relative;
+    z-index: 10;
+    overflow: visible;
+}
+
+.portfolio-controls .Select-menu-outer {
+    z-index: 11;
 }
 
 /* Inputs */
@@ -1018,4 +1030,266 @@ button.secondary:hover {
         flex: 1;
         justify-content: center;
     }
+}
+
+/* ==========================================================================
+   News Sentiment page (/sentiment)
+   Reuses the .news-* card and control styles; everything below is the
+   sentiment-specific layer: score typography, tone chips and the
+   probability bars that expose what the model actually returned.
+   ========================================================================== */
+
+.sent-metrics {
+    grid-template-columns: repeat(5, minmax(120px, 1fr));
+}
+
+/* --- Per-ticker summary cards -------------------------------------------- */
+
+.sent-ticker-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    gap: 14px;
+    margin-bottom: 18px;
+}
+
+.sent-ticker-card {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 16px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--card);
+    transition: transform 160ms ease, border-color 160ms ease, box-shadow 160ms ease;
+}
+
+.sent-ticker-card:hover {
+    transform: translateY(-2px);
+    border-color: var(--border-strong);
+    box-shadow: var(--shadow-hover);
+}
+
+.sent-score {
+    font-size: 34px;
+    font-weight: 800;
+    line-height: 1;
+    letter-spacing: -0.02em;
+    font-variant-numeric: tabular-nums;
+}
+
+.sent-card-meta {
+    color: var(--muted);
+    font-size: 12px;
+}
+
+.sent-card-top {
+    margin-top: auto;
+    padding-top: 8px;
+    border-top: 1px solid var(--border);
+    color: var(--muted);
+    font-size: 12px;
+    line-height: 1.5;
+}
+
+.sent-card-link {
+    color: var(--text);
+    text-decoration: none;
+}
+
+.sent-card-link:hover {
+    color: var(--accent-bright);
+    text-decoration: underline;
+}
+
+/* --- Tone chips ----------------------------------------------------------- */
+
+.sent-tone {
+    padding: 4px 9px;
+    border-radius: 999px;
+    font-size: 11px;
+    font-weight: 800;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+}
+
+.sent-tone-bullish {
+    color: var(--positive);
+    background: rgba(52, 211, 153, 0.14);
+}
+
+.sent-tone-bearish {
+    color: var(--negative);
+    background: rgba(251, 113, 133, 0.14);
+}
+
+.sent-tone-neutral {
+    color: var(--muted);
+    background: rgba(148, 163, 184, 0.14);
+}
+
+/* --- Scored headline cards ------------------------------------------------ */
+
+.sent-headline-card {
+    min-height: 0;
+    gap: 8px;
+}
+
+.sent-inline-score {
+    margin-left: auto;
+    margin-right: 8px;
+    font-weight: 800;
+    font-variant-numeric: tabular-nums;
+}
+
+.sent-prob-bar {
+    display: flex;
+    width: 100%;
+    height: 8px;
+    margin-top: auto;
+    overflow: hidden;
+    border-radius: 999px;
+    background: rgba(148, 163, 184, 0.12);
+}
+
+.sent-prob-segment {
+    height: 100%;
+    transition: width 200ms ease;
+}
+
+.sent-prob-legend {
+    color: var(--muted);
+    font-size: 11px;
+    font-variant-numeric: tabular-nums;
+}
+
+/* --- Explainer panel ------------------------------------------------------ */
+
+.sent-explainer {
+    margin-top: 18px;
+}
+
+.sent-steps {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+    gap: 14px;
+    margin-bottom: 18px;
+}
+
+.sent-step {
+    padding: 14px;
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--accent);
+    border-radius: var(--radius-sm);
+    background: rgba(2, 6, 23, 0.35);
+}
+
+.sent-step-title {
+    margin-bottom: 6px;
+    color: var(--accent-bright);
+    font-size: 13px;
+    font-weight: 800;
+    letter-spacing: 0.03em;
+}
+
+.sent-step-body {
+    margin: 0;
+    color: var(--text);
+    font-size: 13px;
+    line-height: 1.6;
+}
+
+.sent-caveat-title {
+    margin-bottom: 8px;
+    color: var(--text-strong);
+    font-size: 14px;
+    font-weight: 700;
+}
+
+.sent-caveats {
+    margin: 0;
+    padding-left: 20px;
+    color: var(--muted);
+    font-size: 13px;
+    line-height: 1.7;
+}
+
+.sent-caveats li {
+    margin-bottom: 6px;
+}
+
+@media (max-width: 900px) {
+    .sent-metrics {
+        grid-template-columns: repeat(2, minmax(120px, 1fr));
+    }
+}
+
+@media (max-width: 640px) {
+    .sent-metrics,
+    .sent-ticker-grid,
+    .sent-steps {
+        grid-template-columns: 1fr;
+    }
+
+    .sent-score {
+        font-size: 28px;
+    }
+}
+
+/* Used by both /portfolio-news and /sentiment; previously unstyled. */
+.news-hero-copy {
+    flex: 1;
+    min-width: 0;
+}
+
+.news-dropdown {
+    min-width: 180px;
+}
+
+/* Shared analytical controls and account summaries. */
+.analysis-controls {
+    position: relative;
+    z-index: 20;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: end;
+    gap: 16px;
+    margin-bottom: 24px;
+    overflow: visible;
+}
+.analysis-controls > div { min-width: 180px; }
+.analysis-controls label, .settings-grid label { display: block; margin-bottom: 8px; }
+.summary-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+    gap: 12px;
+    margin: 18px 0;
+}
+.summary-grid .metric-card { box-sizing: border-box; min-width: 0; }
+.summary-grid .metric-value { overflow-wrap: anywhere; }
+.section-grid > .card + .card { margin-top: 0; }
+.card { min-width: 0; }
+.sent-metrics { grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); }
+.settings-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    gap: 18px;
+    margin: 24px 0;
+}
+.data-status { margin: 14px 0; color: var(--muted); line-height: 1.6; }
+[role="status"] { margin-top: 12px; line-height: 1.5; }
+.portfolio-controls:focus-within { z-index: 15; }
+details > summary { cursor: pointer; padding: 8px 0; font-weight: 700; }
+@media (max-width: 640px) {
+    .toolbar > input, .toolbar > .dash-dropdown { width: 100%; min-width: 0; }
+    .analysis-controls > div { flex: 1; }
+    .main-title { font-size: clamp(24px, 7vw, 40px); }
+    .card-header { flex-wrap: wrap; }
+    .rebalance-row { grid-template-columns: minmax(0, 1fr) auto; gap: 10px; }
+    .rebalance-bucket { grid-column: 1; grid-row: 1; }
+    .rebalance-row .action-chip { grid-column: 2; grid-row: 1; }
+    .rebalance-bar { grid-column: 1 / -1; grid-row: 2; }
+    .rebalance-numbers { grid-column: 1 / -1; grid-row: 3; }
+    .summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .summary-grid .metric-card { padding: 12px; }
+    .summary-grid .metric-value { font-size: 19px; }
 }

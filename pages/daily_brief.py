@@ -6,15 +6,14 @@ from dash import Input, Output, dcc, html
 from Services.helper import load_data
 from Services.news import NewsFetchError, describe_fetch, fetch_portfolio_news
 
-
 MAX_NEWS_ITEMS = 18
 
 
 dash.register_page(
     __name__,
     path="/portfolio-news",
-    name="Portfolio News",
-    title="Portfolio News",
+    name="News",
+    title="News",
     order=4,
 )
 
@@ -97,7 +96,10 @@ def _news_card(article):
             html.Div(
                 [
                     html.Span(article["ticker"], className="news-ticker"),
-                    html.Span(label, className=f"news-impact news-impact-{label.lower().replace(' ', '-')}"),
+                    html.Span(
+                        label,
+                        className=f"news-impact news-impact-{label.lower().replace(' ', '-')}",
+                    ),
                 ],
                 className="news-card-topline",
             ),
@@ -116,7 +118,9 @@ def _news_card(article):
                 ],
                 className="news-meta",
             ),
-            html.P(article.get("description") or "No summary available.", className="news-description"),
+            html.P(
+                article.get("description") or "No summary available.", className="news-description"
+            ),
             html.Div(
                 [
                     html.Span("Why it matters: ", style={"fontWeight": "700"}),
@@ -126,8 +130,16 @@ def _news_card(article):
             ),
             html.Div(
                 [
-                    html.A("Read", href=article["url"], target="_blank", rel="noreferrer", className="news-action"),
-                    html.Span(f'Score {article.get("importance_score", 0)}', className="news-score"),
+                    html.A(
+                        "Read",
+                        href=article["url"],
+                        target="_blank",
+                        rel="noreferrer",
+                        className="news-action",
+                    ),
+                    html.Span(
+                        f"Score {article.get('importance_score', 0)}", className="news-score"
+                    ),
                 ],
                 className="news-card-footer",
             ),
@@ -164,7 +176,7 @@ layout = html.Div(
             [
                 html.Div(
                     [
-                        html.Div("Portfolio News", className="news-eyebrow"),
+                        html.Div("News", className="news-eyebrow"),
                         html.H2("Important News For Your Holdings", className="news-heading"),
                         html.P(
                             "Ranked headlines, portfolio filters, and quick context for the stocks you own.",
@@ -173,7 +185,12 @@ layout = html.Div(
                     ],
                     className="news-hero-copy",
                 ),
-                html.Button("Refresh", id="portfolio-news-refresh-btn", n_clicks=0, className="news-refresh-button"),
+                html.Button(
+                    "Refresh",
+                    id="portfolio-news-refresh-btn",
+                    n_clicks=0,
+                    className="news-refresh-button",
+                ),
             ],
             className="news-hero",
         ),
@@ -243,14 +260,7 @@ if not hasattr(dash, "_portfolio_news_callback_registered"):
         if holdings.empty:
             return [], "No holdings found. Add tickers on the Portfolio page first.", []
 
-        tickers = (
-            holdings["ticker"]
-            .dropna()
-            .astype(str)
-            .str.strip()
-            .str.upper()
-            .tolist()
-        )
+        tickers = holdings["ticker"].dropna().astype(str).str.strip().str.upper().tolist()
         tickers = [ticker for ticker in tickers if ticker]
         if not tickers:
             return [], "No holdings found. Add tickers on the Portfolio page first.", []
@@ -260,12 +270,18 @@ if not hasattr(dash, "_portfolio_news_callback_registered"):
         # background interval are served from cache when it is still fresh.
         force = dash.ctx.triggered_id == "portfolio-news-refresh-btn"
         try:
-            articles = fetch_portfolio_news(tickers, per_ticker=8, max_items=MAX_NEWS_ITEMS, force=force)
+            articles = fetch_portfolio_news(
+                tickers, per_ticker=8, max_items=MAX_NEWS_ITEMS, force=force
+            )
         except NewsFetchError as exc:
             return [], f"Could not load news: {exc}", all_options
 
         if not articles:
-            return [], f"No headlines mentioned your holdings in the last 7 days. {describe_fetch()}", all_options
+            return (
+                [],
+                f"No headlines mentioned your holdings in the last 7 days. {describe_fetch()}",
+                all_options,
+            )
 
         covered_tickers = sorted({article["ticker"] for article in articles})
         status = (
@@ -288,7 +304,14 @@ if not hasattr(dash, "_portfolio_news_callback_registered"):
     def render_portfolio_news(data, search, ticker, impact_filter, sort_by):
         articles = [_deserialize_article(article) for article in (data or [])]
         if not articles:
-            return [], "", _empty_state("No headlines yet", "Headlines appear here once a refresh succeeds — see the status line above.")
+            return (
+                [],
+                "",
+                _empty_state(
+                    "No headlines yet",
+                    "Headlines appear here once a refresh succeeds — see the status line above.",
+                ),
+            )
 
         query = (search or "").strip().lower()
         filtered = []
@@ -315,7 +338,10 @@ if not hasattr(dash, "_portfolio_news_callback_registered"):
         if sort_by == "newest":
             filtered.sort(key=lambda item: item["published_at"], reverse=True)
         else:
-            filtered.sort(key=lambda item: (item.get("importance_score", 0), item["published_at"]), reverse=True)
+            filtered.sort(
+                key=lambda item: (item.get("importance_score", 0), item["published_at"]),
+                reverse=True,
+            )
 
         high_impact = sum(1 for article in articles if article.get("importance_score", 0) >= 7)
         sources = len({article.get("source") for article in articles if article.get("source")})
@@ -328,7 +354,11 @@ if not hasattr(dash, "_portfolio_news_callback_registered"):
         ]
 
         if not filtered:
-            return metrics, "", _empty_state("No matches", "Try another ticker, keyword, or impact filter.")
+            return (
+                metrics,
+                "",
+                _empty_state("No matches", "Try another ticker, keyword, or impact filter."),
+            )
 
         spotlight = html.Div(
             [
@@ -341,7 +371,7 @@ if not hasattr(dash, "_portfolio_news_callback_registered"):
                     className="news-spotlight-title",
                 ),
                 html.Div(
-                    f'{filtered[0]["ticker"]} | {filtered[0]["source"]} | {_relative_time(filtered[0]["published_at"])}',
+                    f"{filtered[0]['ticker']} | {filtered[0]['source']} | {_relative_time(filtered[0]['published_at'])}",
                     className="news-spotlight-meta",
                 ),
                 html.P(_why_it_matters(filtered[0]), className="news-spotlight-text"),

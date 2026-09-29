@@ -1,9 +1,10 @@
 """Decision helpers for the Portfolio page: allocation drift, rebalance
-actions and plain-English takeaways. Pure functions over the holdings
-DataFrame returned by Services.helper.load_data() — no I/O here.
+actions and plain-English takeaways, using persisted risk settings.
 """
+
 import pandas as pd
 
+from Services.settings import get_settings
 
 # Percent of portfolio value each holding type should hold.
 ALLOCATION_TARGETS = {"Core": 60, "High Conviction": 30, "Moonshot": 10}
@@ -45,10 +46,16 @@ def prepare_holdings(df):
 def rebalance_plan(holdings):
     """One row per target bucket: current vs target and the trade that closes the gap."""
     total = float(holdings["market_value"].sum()) if not holdings.empty else 0.0
-    by_type = holdings.groupby("holding_type")["market_value"].sum() if total > 0 else pd.Series(dtype=float)
+    by_type = (
+        holdings.groupby("holding_type")["market_value"].sum()
+        if total > 0
+        else pd.Series(dtype=float)
+    )
 
     rows = []
-    for bucket, target_pct in ALLOCATION_TARGETS.items():
+    settings = get_settings()
+    targets = settings["targets"]
+    for bucket, target_pct in targets.items():
         current_value = float(by_type.get(bucket, 0.0))
         current_pct = current_value / total * 100 if total > 0 else 0.0
         gap_pct = current_pct - target_pct
@@ -56,35 +63,39 @@ def rebalance_plan(holdings):
 
         if total <= 0:
             status, action = "ok", "No holdings"
-        elif abs(gap_pct) <= DRIFT_TOLERANCE_PTS:
+        elif abs(gap_pct) <= settings["drift_tolerance"]:
             status, action = "ok", "On target"
         elif gap_pct > 0:
             status, action = "over", f"Trim ~${abs(gap_value):,.0f}"
         else:
             status, action = "under", f"Add ~${abs(gap_value):,.0f}"
 
-        rows.append({
-            "bucket": bucket,
-            "current_pct": current_pct,
-            "target_pct": target_pct,
-            "gap_pct": gap_pct,
-            "gap_value": gap_value,
-            "status": status,
-            "action": action,
-        })
+        rows.append(
+            {
+                "bucket": bucket,
+                "current_pct": current_pct,
+                "target_pct": target_pct,
+                "gap_pct": gap_pct,
+                "gap_value": gap_value,
+                "status": status,
+                "action": action,
+            }
+        )
 
-    unassigned_value = float(by_type.drop(labels=list(ALLOCATION_TARGETS), errors="ignore").sum())
+    unassigned_value = float(by_type.drop(labels=list(targets), errors="ignore").sum())
     if unassigned_value > 0:
         pct = unassigned_value / total * 100
-        rows.append({
-            "bucket": "Unassigned",
-            "current_pct": pct,
-            "target_pct": 0,
-            "gap_pct": pct,
-            "gap_value": unassigned_value,
-            "status": "warn",
-            "action": "Assign a type",
-        })
+        rows.append(
+            {
+                "bucket": "Unassigned",
+                "current_pct": pct,
+                "target_pct": 0,
+                "gap_pct": pct,
+                "gap_value": unassigned_value,
+                "status": "warn",
+                "action": "Assign a type",
+            }
+        )
     return rows
 
 
@@ -96,7 +107,7 @@ def correlated_pairs(returns, threshold=CORRELATION_ALERT):
     pairs = []
     columns = list(corr.columns)
     for i, left in enumerate(columns):
-        for right in columns[i + 1:]:
+        for right in columns[i + 1 :]:
             value = float(corr.at[left, right])
             if pd.notna(value) and value >= threshold:
                 pairs.append((left, right, value))
@@ -109,61 +120,80 @@ def takeaways(holdings, rebalance_rows=None, pairs=None, headline=None):
     if holdings.empty:
         return [("info", "Add holdings above to get takeaways.")]
 
+    settings = get_settings()
+    concentration_limit = settings["concentration"]
     items = []
 
     top = holdings.sort_values("weight_pct", ascending=False).iloc[0]
-    if top["weight_pct"] > CONCENTRATION_LIMIT_PCT:
-        items.append((
-            "alert",
-            f"{top['ticker']} is {top['weight_pct']:.0f}% of the portfolio — above your "
-            f"{CONCENTRATION_LIMIT_PCT}% concentration line.",
-        ))
+    if top["weight_pct"] > concentration_limit:
+        items.append(
+            (
+                "alert",
+                f"{top['ticker']} is {top['weight_pct']:.0f}% of the portfolio — above your "
+                f"{concentration_limit:g}% concentration line.",
+            )
+        )
     else:
-        items.append((
-            "good",
-            f"No single position above {CONCENTRATION_LIMIT_PCT}% — largest is "
-            f"{top['ticker']} at {top['weight_pct']:.0f}%.",
-        ))
+        items.append(
+            (
+                "good",
+                f"No single position above {concentration_limit:g}% — largest is "
+                f"{top['ticker']} at {top['weight_pct']:.0f}%.",
+            )
+        )
 
     rows = rebalance_rows if rebalance_rows is not None else rebalance_plan(holdings)
     off_target = [row for row in rows if row["status"] in ("over", "under")]
     if off_target:
         worst = max(off_target, key=lambda row: abs(row["gap_pct"]))
         direction = "over" if worst["gap_pct"] > 0 else "under"
-        items.append((
-            "warn",
-            f"{worst['bucket']} is {abs(worst['gap_pct']):.0f} pts {direction} its "
-            f"{worst['target_pct']}% target — {len(off_target)} rebalance action"
-            f"{'s' if len(off_target) != 1 else ''} below.",
-        ))
+        items.append(
+            (
+                "warn",
+                f"{worst['bucket']} is {abs(worst['gap_pct']):.0f} pts {direction} its "
+                f"{worst['target_pct']}% target — {len(off_target)} rebalance action"
+                f"{'s' if len(off_target) != 1 else ''} below.",
+            )
+        )
     else:
-        items.append(("good", f"Allocation is within {DRIFT_TOLERANCE_PTS} pts of target in every bucket."))
+        items.append(
+            (
+                "good",
+                f"Allocation is within {settings['drift_tolerance']:g} pts of target in every bucket.",
+            )
+        )
 
     winners = holdings[holdings["pnl_pct"] >= TRIM_GAIN_PCT]
     if not winners.empty:
         best = winners.sort_values("pnl_pct", ascending=False).iloc[0]
-        items.append((
-            "info",
-            f"{best['ticker']} is up {best['pnl_pct']:.0f}% on cost "
-            f"(${best['Total_Profit_Loss']:,.0f}) — consider locking in some gains.",
-        ))
+        items.append(
+            (
+                "info",
+                f"{best['ticker']} is up {best['pnl_pct']:.0f}% on cost "
+                f"(${best['Total_Profit_Loss']:,.0f}) — review its weight against your risk limits.",
+            )
+        )
 
     losers = holdings[holdings["pnl_pct"] <= REVIEW_LOSS_PCT]
     if not losers.empty:
         worst = losers.sort_values("pnl_pct").iloc[0]
-        items.append((
-            "warn",
-            f"{worst['ticker']} is down {abs(worst['pnl_pct']):.0f}% on cost — "
-            "review the thesis or the position size.",
-        ))
+        items.append(
+            (
+                "warn",
+                f"{worst['ticker']} is down {abs(worst['pnl_pct']):.0f}% on cost — "
+                "review the thesis or the position size.",
+            )
+        )
 
     if pairs:
         left, right, value = pairs[0]
-        items.append((
-            "warn",
-            f"{left} and {right} move together (correlation {value:.2f}) — "
-            "for risk they behave like one position.",
-        ))
+        items.append(
+            (
+                "warn",
+                f"{left} and {right} move together (correlation {value:.2f}) — "
+                "their shared moves reduce diversification; their risk exposures are not identical.",
+            )
+        )
 
     if headline:
         items.append(("info", f"Top headline — {headline['ticker']}: {headline['title']}"))

@@ -1,484 +1,221 @@
-import sqlite3
-
 import dash
-from dash import Input, Output, dcc, html
 import numpy as np
 import pandas as pd
 import plotly.express as px
-import yfinance as yf
+from dash import Input, Output, dcc, html
 
-from Services.database import DB_PATH
+from Services.components import metric_card as _metric_card
+from Services.helper import load_data
+from Services.market import clean_returns, coverage_text, get_historical_prices
+from Services.performance import risk_contributions, valid_covariance
+from Services.settings import get_settings
 
-
-LOOKBACK_PERIOD = "6mo"
-LOOKBACK_INTERVAL = "1d"
-TRADING_DAYS_PER_YEAR = 252
-
-
-dash.register_page(
-    __name__,
-    path="/covariance",
-    name="Covariance",
-    title="Covariance",
-    order=3,
-)
-
-
-def _metric_card(title, value_id):
-    return html.Div(
-        [
-            html.Div(title, className="metric-title"),
-            html.Div("--", id=value_id, className="metric-value"),
-        ],
-        className="metric-card",
-    )
-
+dash.register_page(__name__, path="/covariance", name="Correlations", title="Correlations", order=3)
 
 layout = html.Div(
     [
-        dcc.Location(id='cov_location'),
-        html.H2("Portfolio Correlation Matrix", className="subtitle"),
+        dcc.Location(id="cov_location"),
+        html.H2("Correlations", className="page-title"),
         html.Div(
             [
-                _metric_card("Portfolio Annualized Volatility", "covariance-metric-portfolio-vol"),
-                _metric_card("SPY Volatility Comparison", "covariance-metric-spy-vol"),
-                _metric_card("Diversification Ratio", "covariance-metric-div-ratio"),
+                _metric_card(label, key)
+                for label, key in [
+                    ("Portfolio annualized volatility", "covariance-metric-portfolio-vol"),
+                    ("Benchmark volatility", "covariance-metric-spy-vol"),
+                    ("Diversification ratio", "covariance-metric-div-ratio"),
+                ]
             ],
-            style={"display": "flex", "gap": "12px", "flexWrap": "wrap", "marginBottom": "12px"},
+            className="summary-grid",
         ),
-        html.Div(id="covariance-status", style={"marginBottom": "12px"}),
+        html.Div(id="covariance-status", className="data-status"),
         dcc.Graph(id="covariance-heatmap"),
-        html.Div(id="covariance-insights", style={"marginTop": "12px"}),
+        html.Div(id="covariance-insights", className="panel"),
+        dcc.Graph(id="risk-contribution-chart"),
+        html.P(
+            "Risk contribution is each holding's share of modeled portfolio variance, using current invested weights. "
+            "A negative contribution can indicate a diversifying position. Cash is excluded."
+        ),
+        html.Div(
+            [
+                html.H3("Scenario analysis"),
+                html.Label("Broad market shock (%)"),
+                dcc.Slider(
+                    -60,
+                    30,
+                    5,
+                    value=-20,
+                    id="scenario-market",
+                    tooltip={"placement": "bottom", "always_visible": True},
+                ),
+                html.Label("Holding-type shock (%)"),
+                dcc.Slider(
+                    -80,
+                    30,
+                    5,
+                    value=-30,
+                    id="scenario-bucket-shock",
+                    tooltip={"placement": "bottom", "always_visible": True},
+                ),
+                dcc.Dropdown(
+                    id="scenario-bucket",
+                    options=[
+                        {"label": k, "value": k} for k in ["Core", "High Conviction", "Moonshot"]
+                    ],
+                    value="Moonshot",
+                    clearable=False,
+                ),
+                html.Div(id="scenario-results", className="data-status"),
+                html.P(
+                    "These are separate hypothetical shocks, not probabilities. Market impact uses historical beta; "
+                    "holding-type impact applies the chosen percentage directly. Correlations and beta can change in a crisis."
+                ),
+            ],
+            className="card portfolio-controls",
+        ),
+        dcc.Store(id="risk-sample"),
     ]
 )
 
 
-def _empty_figure(message):
-    fig = px.imshow([[0]], text_auto=False)
-    fig.update_traces(showscale=False, hoverinfo="skip")
-    fig.update_xaxes(visible=False)
-    fig.update_yaxes(visible=False)
-    fig.update_layout(
-        title="Correlation Matrix",
-        annotations=[
-            {
-                "text": message,
-                "xref": "paper",
-                "yref": "paper",
-                "x": 0.5,
-                "y": 0.5,
-                "showarrow": False,
-                "font": {"size": 15},
-            }
-        ],
+@dash.callback(
+    Output("covariance-status", "children"),
+    Output("covariance-heatmap", "figure"),
+    Output("covariance-insights", "children"),
+    Output("covariance-metric-portfolio-vol", "children"),
+    Output("covariance-metric-spy-vol", "children"),
+    Output("covariance-metric-div-ratio", "children"),
+    Output("risk-contribution-chart", "figure"),
+    Output("risk-sample", "data"),
+    Input("cov_location", "pathname"),
+    Input("analysis-period", "value"),
+    Input("analysis-benchmark", "value"),
+    Input("settings-version", "data"),
+)
+def refresh_covariance(_pathname, period="1y", benchmark="SPY", _version=None):
+    def empty(message):
+        return message, px.line(), "", "N/A", "N/A", "N/A", px.line(), None
+
+    holdings = load_data()
+    if holdings.empty or holdings.market_value.sum() <= 0:
+        return empty("No invested holdings.")
+    prices = get_historical_prices(holdings.ticker.tolist() + [benchmark], period)
+    if prices.empty:
+        return empty("Historical prices are unavailable.")
+    returns = clean_returns(prices.reindex(columns=holdings.ticker.tolist()))
+    bench = (
+        prices[benchmark].pct_change(fill_method=None).dropna()
+        if benchmark in prices
+        else pd.Series(dtype=float)
     )
-    return fig
-
-
-def _default_metrics():
-    return "--", "--", "--"
-
-
-def _load_holdings():
-    with sqlite3.connect(DB_PATH) as conn:
-        df = pd.read_sql(
-            "SELECT ticker, market_value, shares, current_price FROM portfolio",
-            conn,
-        )
-
-    if df.empty:
-        return df
-
-    df["ticker"] = df["ticker"].astype(str).str.strip().str.upper()
-    df = df[df["ticker"] != ""]
-    return df
-
-
-def _extract_prices(data, symbols):
-    if data is None or data.empty:
-        return pd.DataFrame()
-
-    if isinstance(data.columns, pd.MultiIndex):
-        level0 = set(data.columns.get_level_values(0))
-        if "Adj Close" in level0:
-            prices = data["Adj Close"]
-        elif "Close" in level0:
-            prices = data["Close"]
-        else:
-            return pd.DataFrame()
-
-        if isinstance(prices, pd.Series):
-            prices = prices.to_frame()
-
-        prices.columns = [str(col).upper().strip() for col in prices.columns]
-        return prices
-
-    if "Adj Close" in data.columns:
-        series = data["Adj Close"]
-    elif "Close" in data.columns:
-        series = data["Close"]
-    else:
-        return pd.DataFrame()
-
-    column_name = symbols[0].upper().strip() if symbols else "PRICE"
-    return series.to_frame(name=column_name)
-
-
-def _format_metric_texts(portfolio_vol_ann, spy_vol_ann, diversification_ratio):
-    portfolio_text = "--" if portfolio_vol_ann is None else f"{portfolio_vol_ann * 100:.2f}%"
-
-    if spy_vol_ann is None:
-        spy_text = "SPY: N/A"
-    else:
-        if portfolio_vol_ann is None:
-            spread_text = "Spread N/A"
-        else:
-            spread_pp = (portfolio_vol_ann - spy_vol_ann) * 100
-            spread_text = f"Spread {spread_pp:+.2f} pp"
-        spy_text = f"SPY {spy_vol_ann * 100:.2f}% | {spread_text}"
-
-    diversification_text = "--" if diversification_ratio is None else f"{diversification_ratio:.1f}"
-    return portfolio_text, spy_text, diversification_text
-
-
-def _build_weight_series(holdings, valid_tickers):
-    if not valid_tickers:
-        return pd.Series(dtype=float)
-
-    market_value = pd.to_numeric(holdings["market_value"], errors="coerce")
-    shares = pd.to_numeric(holdings["shares"], errors="coerce")
-    current_price = pd.to_numeric(holdings["current_price"], errors="coerce")
-
-    fallback_value = shares * current_price
-    position_value = market_value.where(market_value > 0, fallback_value)
-    position_value = position_value.where(position_value > 0, 0.0).fillna(0.0)
-
-    by_ticker = pd.Series(position_value.values, index=holdings["ticker"]).groupby(level=0).sum()
-    selected = by_ticker.reindex(valid_tickers).fillna(0.0)
-
-    total_value = float(selected.sum())
-    if total_value > 0:
-        return selected / total_value
-
-    equal_weight = 1.0 / len(valid_tickers)
-    return pd.Series(np.full(len(valid_tickers), equal_weight), index=valid_tickers)
-
-
-def _empty_insights(message):
-    return html.Div(
-        [
-            html.H4("Correlation Insights", style={"marginBottom": "8px"}),
-            html.Div(message),
-        ],
-        className="panel",
-    )
-
-
-def _build_correlation_insights(corr):
-    if corr.empty or corr.shape[0] < 2:
-        return _empty_insights("No standout correlation pairs yet.")
-
-    pair_rows = []
-    columns = corr.columns.tolist()
-    for left_idx, left_ticker in enumerate(columns):
-        for right_idx in range(left_idx + 1, len(columns)):
-            right_ticker = columns[right_idx]
-            value = float(corr.iat[left_idx, right_idx])
-            pair_rows.append(
-                {
-                    "left": left_ticker,
-                    "right": right_ticker,
-                    "correlation": value,
-                    "abs_correlation": abs(value),
-                }
-            )
-
-    if not pair_rows:
-        return _empty_insights("No standout correlation pairs yet.")
-
-    pairs = pd.DataFrame(pair_rows).sort_values("abs_correlation", ascending=False).reset_index(drop=True)
-    threshold = float(pairs["abs_correlation"].quantile(0.8))
-    significant = pairs[pairs["abs_correlation"] >= threshold].head(5)
-    if significant.empty:
-        significant = pairs.head(min(3, len(pairs)))
-
-    insight_items = []
-    for _, row in significant.iterrows():
-        direction = "move together" if row["correlation"] >= 0 else "tend to offset each other"
-        strength = "strong" if row["abs_correlation"] >= significant["abs_correlation"].median() else "notable"
-        insight_items.append(
-            html.Li(
-                f"{row['left']} and {row['right']} {direction} with {strength} correlation ({row['correlation']:.2f})."
-            )
-        )
-
-    return html.Div(
-        [
-            html.H4("Correlation Insights", style={"marginBottom": "8px"}),
-            html.Ul(insight_items, style={"margin": "0", "paddingLeft": "20px"}),
-        ],
-        className="panel",
-    )
-
-
-# Diversification ratio = weighted average holding volatility / portfolio volatility.
-# 1.0 means the holdings give no offsetting benefit at all; upper bound, label, meaning.
-DIVERSIFICATION_BANDS = [
-    (1.15, "Low", "The portfolio behaves almost like a single position — holdings rise and fall together."),
-    (1.40, "Modest", "There is some offsetting between holdings, but most of the risk still moves as one block."),
-    (1.80, "Reasonable", "Holdings offset each other meaningfully; the portfolio is calmer than its parts."),
-    (float("inf"), "Strong", "Holdings are largely independent of each other — a well-spread book."),
-]
-CONCENTRATION_LIMIT = 0.25
-HIGH_AVG_CORRELATION = 0.5
-
-
-def _diversification_verdict(ratio):
-    for upper, label, meaning in DIVERSIFICATION_BANDS:
-        if ratio < upper:
-            return label, meaning
-    return DIVERSIFICATION_BANDS[-1][1], DIVERSIFICATION_BANDS[-1][2]
-
-
-def _verdict_chip(label):
-    return html.Span(label, className=f"verdict-chip verdict-{label.lower()}")
-
-
-def _build_diversification_insight(ratio, weights, corr, asset_vols_ann, portfolio_vol_ann):
-    label, meaning = _diversification_verdict(ratio)
-
-    weight_vec = weights.reindex(corr.index).fillna(0.0)
-    avg_vol = float(np.dot(weight_vec.to_numpy(), asset_vols_ann))
-    reduction_pct = (1 - portfolio_vol_ann / avg_vol) * 100 if avg_vol > 0 else 0.0
-
-    ranked = weight_vec.sort_values(ascending=False)
-    top_ticker, top_weight = ranked.index[0], float(ranked.iloc[0])
-    effective_positions = 1.0 / float((ranked ** 2).sum()) if float((ranked ** 2).sum()) > 0 else 0.0
-
-    off_diagonal = corr.values[~np.eye(len(corr), dtype=bool)]
-    avg_corr = float(np.nanmean(off_diagonal)) if off_diagonal.size else 0.0
-
-    bullets = [
-        f"Your holdings run at {avg_vol * 100:.1f}% volatility on average; combined, the portfolio runs at "
-        f"{portfolio_vol_ann * 100:.1f}% — diversification removes {reduction_pct:.0f}% of the standalone risk.",
-        f"Effective number of positions: {effective_positions:.1f} of {len(ranked)} — "
-        f"{top_ticker} alone is {top_weight * 100:.0f}% of the book.",
-        f"Average correlation between holdings: {avg_corr:.2f}.",
-    ]
-
-    if top_weight > CONCENTRATION_LIMIT:
-        lever = (
-            f"Biggest lever: trim {top_ticker}. At {top_weight * 100:.0f}% of the portfolio it caps the ratio "
-            "no matter how uncorrelated the other names are."
-        )
-    elif avg_corr > HIGH_AVG_CORRELATION:
-        lever = (
-            "Biggest lever: add positions that don't track the current ones — a different sector, region or "
-            "asset class. The existing names move together, so adding more of the same won't help."
-        )
-    else:
-        lever = "No structural issue: keep weights balanced as you add positions and the ratio will hold."
-
-    return html.Div(
-        [
-            html.H4("Diversification", style={"marginBottom": "8px"}),
-            html.Div(
-                [html.Span(f"{ratio:.2f}", className="verdict-value"), _verdict_chip(label)],
-                className="verdict-row",
-            ),
-            html.P(meaning, style={"margin": "8px 0"}),
-            html.Ul([html.Li(text) for text in bullets], style={"margin": "0 0 10px", "paddingLeft": "20px"}),
-            html.P(lever, style={"margin": "0 0 10px", "fontWeight": "600"}),
-            html.Div(
-                "Diversification ratio = weighted average holding volatility ÷ portfolio volatility. "
-                "1.0 means no benefit from combining the holdings; higher means they offset each other more.",
-                className="muted",
-            ),
-        ],
-        className="panel",
-    )
-
-
-def _build_covariance_outputs(holdings):
-    default_portfolio, default_spy, default_div = _default_metrics()
-
-    if holdings.empty:
-        return (
-            html.Div("No holdings found."),
-            _empty_figure("No holdings found."),
-            _empty_insights("Add at least 2 tickers to surface pair insights."),
-            default_portfolio,
-            default_spy,
-            default_div,
-        )
-
-    tickers = sorted(holdings["ticker"].dropna().unique().tolist())
-    symbols = sorted(set(tickers + ["SPY"]))
-
-    try:
-        history = yf.download(
-            tickers=symbols,
-            period=LOOKBACK_PERIOD,
-            interval=LOOKBACK_INTERVAL,
-            progress=False,
-            auto_adjust=False,
-            group_by="column",
-            threads=False,
-        )
-    except Exception as exc:
-        # Fail fast if remote fetch is not available
-        return (
-            html.Div(f"Unable to fetch market data: {exc}"),
-            _empty_figure("Market data request failed."),
-            _empty_insights("Market data request failed."),
-            default_portfolio,
-            default_spy,
-            default_div,
-        )
-
-    prices_all = _extract_prices(history, symbols)
-    if prices_all.empty:
-        return (
-            html.Div("Insufficient price history to compute correlation."),
-            _empty_figure("No usable price history."),
-            _empty_insights("No usable price history for pair insights."),
-            default_portfolio,
-            default_spy,
-            default_div,
-        )
-
-    spy_vol_ann = None
-    if "SPY" in prices_all.columns:
-        spy_returns = prices_all["SPY"].ffill().dropna().pct_change().dropna()
-        if spy_returns.shape[0] >= 2:
-            spy_vol_ann = float(spy_returns.std() * np.sqrt(TRADING_DAYS_PER_YEAR))
-
-    requested = set(tickers)
-    portfolio_prices = prices_all[[col for col in prices_all.columns if col in requested]]
-    portfolio_prices = portfolio_prices.dropna(axis=1, how="all")
-    portfolio_prices = portfolio_prices.ffill().dropna(how="all")
-
-    returns = portfolio_prices.pct_change().dropna(how="all")
-    returns = returns.dropna(axis=1, how="all")
-
-    portfolio_vol_ann = None
-    diversification_ratio = None
-    weights = None
-    asset_vols_ann = None
-    valid_tickers = returns.columns.tolist()
-
-    if returns.shape[0] >= 2 and returns.shape[1] >= 1:
-        cov_for_metrics = returns.cov().reindex(index=valid_tickers, columns=valid_tickers).fillna(0.0)
-        weights = _build_weight_series(holdings, valid_tickers)
-
-        weight_vec = weights.to_numpy(dtype=float)
-        cov_values = cov_for_metrics.to_numpy(dtype=float)
-
-        variance_daily = float(weight_vec.T @ cov_values @ weight_vec)
-        variance_daily = max(variance_daily, 0.0)
-        sigma_portfolio_daily = float(np.sqrt(variance_daily))
-
-        portfolio_vol_ann = sigma_portfolio_daily * np.sqrt(TRADING_DAYS_PER_YEAR)
-
-        asset_vols = np.sqrt(np.clip(np.diag(cov_values), 0.0, None))
-        asset_vols_ann = asset_vols * np.sqrt(TRADING_DAYS_PER_YEAR)
-        if len(valid_tickers) == 1:
-            diversification_ratio = 1.0
-        elif sigma_portfolio_daily > 0:
-            diversification_ratio = float(np.dot(weight_vec, asset_vols) / sigma_portfolio_daily)
-
-    portfolio_metric, spy_metric, div_metric = _format_metric_texts(
-        portfolio_vol_ann,
-        spy_vol_ann,
-        diversification_ratio,
-    )
-    if diversification_ratio is not None:
-        verdict_label, _ = _diversification_verdict(diversification_ratio)
-        div_metric = [html.Span(div_metric, style={"marginRight": "10px"}), _verdict_chip(verdict_label)]
-
-    used_count = len(valid_tickers)
-    observations = returns.shape[0]
-    dropped = sorted(requested - set(valid_tickers))
-
-    status_parts = [
-        "Window: 1 year (daily).",
-        f"Tickers used: {used_count} / {len(tickers)}.",
-        f"Observations: {observations}.",
-    ]
-    if dropped:
-        status_parts.append(f"Filtered due to missing data: {', '.join(dropped)}.")
-
-    if returns.shape[0] < 2 or returns.shape[1] < 2:
-        status_parts.append("Need at least 2 tickers with usable return history for correlation.")
-        return (
-            html.Div(" ".join(status_parts)),
-            _empty_figure("Insufficient return history for correlation."),
-            _empty_insights("Need at least 2 tickers with usable return history for pair insights."),
-            portfolio_metric,
-            spy_metric,
-            div_metric,
-        )
-
-    corr = returns.corr().sort_index().sort_index(axis=1)
-    if corr.empty or corr.shape[0] < 2:
-        status_parts.append("Correlation matrix unavailable after filtering.")
-        return (
-            html.Div(" ".join(status_parts)),
-            _empty_figure("Correlation matrix unavailable."),
-            _empty_insights("Correlation matrix unavailable for pair insights."),
-            portfolio_metric,
-            spy_metric,
-            div_metric,
-        )
-
+    if not bench.empty:
+        common = returns.index.intersection(bench.index)
+        returns, bench = returns.loc[common], bench.loc[common]
+    status = coverage_text(holdings, returns, period, benchmark)
+    if len(returns) < 30 or returns.shape[1] == 0:
+        return empty(status + " At least 30 complete common observations are required.")
+    values = holdings.set_index("ticker").market_value.reindex(returns.columns)
+    weights = values / values.sum()
+    cov = valid_covariance(returns)
+    w = weights.to_numpy()
+    variance = float(w @ cov @ w)
+    volatility = np.sqrt(variance * 252)
+    avg_vol = float(w @ np.sqrt(np.diag(cov) * 252))
+    ratio = avg_vol / volatility if volatility > 0 else None
+    corr = returns.corr()
     fig = px.imshow(
-        corr.values,
-        x=corr.columns,
-        y=corr.index,
-        aspect="auto",
-        color_continuous_scale="RdBu",
+        corr,
         zmin=-1,
         zmax=1,
-        labels={"x": "Ticker", "y": "Ticker", "color": "Correlation"},
+        color_continuous_scale="RdBu",
+        title=f"Daily-return correlations ({period})",
+        labels={"color": "Correlation"},
     )
-    fig.update_traces(
-        hovertemplate="X: %{x}<br>Y: %{y}<br>Correlation: %{z:.2f}<extra></extra>"
+    contributions = risk_contributions(returns, weights) * 100
+    contribution_fig = px.bar(
+        x=contributions.index,
+        y=contributions.values,
+        labels={"x": "Holding", "y": "Share of portfolio variance (%)"},
+        title="Which holdings drive portfolio risk?",
     )
-    fig.update_layout(title="Correlation Matrix (Daily Returns, 1Y)")
-    insights = _build_correlation_insights(corr)
-    if diversification_ratio is not None and weights is not None and portfolio_vol_ann:
-        insights = html.Div(
-            [
-                _build_diversification_insight(
-                    diversification_ratio, weights, corr, asset_vols_ann, portfolio_vol_ann
-                ),
-                insights,
-            ],
-            style={"display": "grid", "gap": "12px"},
+    settings = get_settings()
+    top = weights.idxmax()
+    explanation = [
+        html.P(
+            f"Largest modeled holding: {top} ({weights[top]:.1%}). Concentration limit: {settings['concentration']:g}%."
         )
-
+    ]
+    if weights[top] * 100 > settings["concentration"]:
+        explanation.append(html.P("This holding exceeds your configured concentration limit."))
+    pairs = [
+        (a, b, float(corr.loc[a, b]))
+        for i, a in enumerate(corr)
+        for b in corr.columns[i + 1 :]
+        if pd.notna(corr.loc[a, b])
+    ]
+    strong = sorted([p for p in pairs if abs(p[2]) >= 0.7], key=lambda p: abs(p[2]), reverse=True)[
+        :5
+    ]
+    explanation.append(
+        html.Ul(
+            [
+                html.Li(f"{a} / {b}: {v:.2f} ({'move together' if v > 0 else 'tend to offset'}).")
+                for a, b, v in strong
+            ]
+        )
+        if strong
+        else html.P("No pair has absolute correlation of at least 0.70 in this sample.")
+    )
+    explanation.append(
+        html.P(
+            "Diversification ratio = weighted average individual volatility / portfolio volatility. It describes this sample, not a guarantee about future diversification."
+        )
+    )
+    portfolio = returns @ weights
+    beta = (
+        float(portfolio.cov(bench) / bench.var())
+        if len(bench) > 1 and bench.var() > 1e-20
+        else None
+    )
+    payload = {
+        "beta": beta,
+        "modeled_value": float(values.sum()),
+        "coverage": float(values.sum() / holdings.market_value.sum()),
+        "buckets": holdings.groupby("holding_type").market_value.sum().to_dict(),
+    }
     return (
-        html.Div(" ".join(status_parts)),
+        status,
         fig,
-        insights,
-        portfolio_metric,
-        spy_metric,
-        div_metric,
+        explanation,
+        f"{volatility:.2%}",
+        f"{bench.std() * np.sqrt(252):.2%}" if len(bench) > 1 else "N/A",
+        f"{ratio:.2f}" if ratio is not None else "N/A",
+        contribution_fig,
+        payload,
     )
 
 
-if not hasattr(dash, '_covariance_callback_registered'):
-    dash._covariance_callback_registered = True
-
-    @dash.callback(
-        Output("covariance-status", "children"),
-        Output("covariance-heatmap", "figure"),
-        Output("covariance-insights", "children"),
-        Output("covariance-metric-portfolio-vol", "children"),
-        Output("covariance-metric-spy-vol", "children"),
-        Output("covariance-metric-div-ratio", "children"),
-        Input('cov_location', 'pathname')
+@dash.callback(
+    Output("scenario-results", "children"),
+    Input("risk-sample", "data"),
+    Input("scenario-market", "value"),
+    Input("scenario-bucket-shock", "value"),
+    Input("scenario-bucket", "value"),
+)
+def scenario_results(sample, market_shock, bucket_shock, bucket):
+    if not sample:
+        return "Load a valid risk sample to calculate scenarios."
+    if not (-60 <= float(market_shock) <= 30 and -80 <= float(bucket_shock) <= 30):
+        return "Choose shocks within the displayed ranges."
+    beta = sample.get("beta")
+    market = (
+        "Market scenario unavailable without benchmark data."
+        if beta is None
+        else f"Market scenario: {beta * market_shock / 100 * sample['modeled_value']:+,.2f} USD on modeled holdings (beta {beta:.2f}; {sample['coverage']:.1%} value coverage)."
     )
-    def refresh_covariance(_):
-        holdings = _load_holdings()
-        return _build_covariance_outputs(holdings)
+    bucket_value = sample["buckets"].get(bucket, 0)
+    return [
+        html.P(market),
+        html.P(
+            f"Separate {bucket} scenario: {bucket_value * bucket_shock / 100:+,.2f} USD on ${bucket_value:,.2f} of holdings."
+        ),
+    ]

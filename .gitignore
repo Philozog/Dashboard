@@ -4,3 +4,9 @@ __pycache__/
 *.pyo
 .venv/
 venv/
+data/
+portfolio.db
+*.db-wal
+*.db-shm
+test-results/
+dist/

@@ -5,12 +5,36 @@ from datetime import datetime, timedelta, timezone
 
 import requests
 
-
 NEWS_ENDPOINT = "https://newsapi.org/v2/everything"
 LOOKBACK_DAYS = 7
 REQUEST_TIMEOUT = 10
 # NewsAPI caps the q parameter at 500 characters; leave headroom.
 MAX_QUERY_CHARS = 480
+# Explicit aliases avoid treating short symbols as ordinary words. Extend for
+# additional holdings; no company-name lookup is performed on each page load.
+COMPANY_NAMES = {
+    "AAPL": ["Apple"],
+    "MSFT": ["Microsoft"],
+    "NVDA": ["Nvidia"],
+    "GOOG": ["Alphabet", "Google"],
+    "GOOGL": ["Alphabet", "Google"],
+    "AMZN": ["Amazon"],
+    "META": ["Meta Platforms"],
+    "TSLA": ["Tesla"],
+    "AMD": ["Advanced Micro Devices"],
+    "PLTR": ["Palantir"],
+    "JPM": ["JPMorgan"],
+    "V": ["Visa"],
+    "MA": ["Mastercard"],
+    "T": ["AT&T"],
+    "F": ["Ford Motor"],
+    "C": ["Citigroup"],
+    "BRK-B": ["Berkshire Hathaway"],
+    "LLY": ["Eli Lilly"],
+    "AVGO": ["Broadcom"],
+    "COST": ["Costco"],
+    "NFLX": ["Netflix"],
+}
 TOPIC_FILTER = "(stock OR shares OR earnings OR guidance OR analyst OR revenue)"
 # Serve cached headlines for this long before hitting the API again.
 # The free NewsAPI plan allows only 100 requests/day, so every request counts.
@@ -97,7 +121,7 @@ def _score_article(article):
     ).lower()
     score = 0
     for keyword, weight in IMPORTANT_KEYWORDS.items():
-        if keyword in text:
+        if re.search(rf"\b{re.escape(keyword)}\b", text):
             score += weight
     return score
 
@@ -123,7 +147,8 @@ def _normalize_tickers(tickers):
 
 
 def _build_query(tickers):
-    symbols = " OR ".join(f'"{ticker}"' for ticker in tickers)
+    terms = [term for ticker in tickers for term in [ticker, *COMPANY_NAMES.get(ticker, [])]]
+    symbols = " OR ".join(f'"{term}"' for term in dict.fromkeys(terms))
     return f"({symbols}) AND {TOPIC_FILTER}"
 
 
@@ -142,11 +167,21 @@ def _chunk_tickers(tickers):
     return chunks
 
 
-def _match_ticker(text, tickers):
+def _match_tickers(text, tickers):
+    matches = []
     for ticker in tickers:
-        if re.search(rf"\b{re.escape(ticker)}\b", text):
-            return ticker
-    return None
+        symbol = (
+            re.search(rf"(?:\$|NASDAQ:\s*|NYSE:\s*){re.escape(ticker)}\b", text)
+            if len(ticker) <= 2
+            else re.search(rf"\b{re.escape(ticker)}\b", text)
+        )
+        company = any(
+            re.search(rf"\b{re.escape(name)}\b", text, re.IGNORECASE)
+            for name in COMPANY_NAMES.get(ticker, [])
+        )
+        if symbol or company:
+            matches.append(ticker)
+    return matches
 
 
 def _request_articles(tickers, page_size=100):
@@ -158,10 +193,11 @@ def _request_articles(tickers, page_size=100):
         "pageSize": page_size,
         "searchIn": "title,description",
         "from": from_date,
-        "apiKey": _api_key(),
     }
 
-    response = requests.get(NEWS_ENDPOINT, params=params, timeout=REQUEST_TIMEOUT)
+    response = requests.get(
+        NEWS_ENDPOINT, params=params, headers={"X-Api-Key": _api_key()}, timeout=REQUEST_TIMEOUT
+    )
     try:
         payload = response.json()
     except ValueError:
@@ -183,12 +219,12 @@ def _request_articles(tickers, page_size=100):
             continue
         title = raw.get("title") or "Untitled article"
         description = raw.get("description") or ""
-        ticker = _match_ticker(f"{title} {description}", tickers)
-        if ticker is None:
+        matched = _match_tickers(f"{title} {description}", tickers)
+        if not matched:
             continue
 
         article = {
-            "ticker": ticker,
+            "tickers": matched,
             "title": title,
             "description": description,
             "url": raw.get("url") or "",
@@ -196,7 +232,7 @@ def _request_articles(tickers, page_size=100):
             "published_at": published_at,
         }
         article["importance_score"] = _score_article(article)
-        articles.append(article)
+        articles.extend({**article, "ticker": ticker} for ticker in matched)
     return articles
 
 
@@ -209,9 +245,10 @@ def _fetch_live(tickers):
     seen_urls = set()
     for article in all_articles:
         url = article.get("url")
-        if not url or url in seen_urls:
+        identity = (url, article["ticker"])
+        if not url or identity in seen_urls:
             continue
-        seen_urls.add(url)
+        seen_urls.add(identity)
         deduped.append(article)
 
     deduped.sort(
@@ -244,7 +281,7 @@ def fetch_portfolio_news(tickers, per_ticker=8, max_items=20, force=False):
     last_fetch_info() reports source="stale" with the error. Raises
     NewsFetchError only when nothing at all can be returned.
     """
-    key = tuple(_normalize_tickers(tickers))
+    key = tuple(sorted(_normalize_tickers(tickers)))
     if not key:
         _set_info(None, None, None)
         return []

@@ -1,5 +1,4 @@
-
-#For local run
+# For local run
 
 from app import app
 

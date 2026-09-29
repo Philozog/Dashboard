@@ -1,0 +1,4 @@
+# Install CPU torch separately using https://download.pytorch.org/whl/cpu.
+# These preserve the project's existing model dependency selections.
+torch==2.14.0
+transformers==5.17.0

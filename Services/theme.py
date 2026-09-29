@@ -2,9 +2,9 @@
 
 Colors mirror the CSS tokens in assets/style.css; keep the two in sync.
 """
+
 import plotly.graph_objects as go
 import plotly.io as pio
-
 
 TEXT = "#e2e8f0"
 TEXT_STRONG = "#f8fafc"

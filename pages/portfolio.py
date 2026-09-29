@@ -1,20 +1,21 @@
-from dash import dcc, html, dash_table
-import dash
-from dash.dependencies import Input, Output, State
+import sqlite3
 from datetime import datetime, timedelta, timezone
 
+import dash
 import pandas as pd
-import sqlite3
 import plotly.express as px
 import plotly.graph_objects as go
+from dash import dash_table, dcc, html
+from dash.dependencies import Input, Output, State
 
-from Services.updater import update_prices
-from Services.helper import load_data
-from Services.database import DB_PATH
-from Services.news import NewsFetchError, describe_fetch, fetch_portfolio_news
 from Services import insights, theme
-from pages.analytics import get_historical_prices
-
+from Services.components import metric_card
+from Services.helper import load_data
+from Services.ledger import account_summary, set_holding_type, transact, transaction_history
+from Services.market import get_historical_prices
+from Services.news import NewsFetchError, describe_fetch, fetch_portfolio_news
+from Services.settings import get_settings
+from Services.updater import update_prices
 
 # Diverging fill for the map: rose (loss) -> neutral slate (flat) -> emerald (gain).
 # Poles are deliberately darker than the theme accents so white tile labels stay readable.
@@ -26,11 +27,16 @@ def make_portfolio_map(df):
     """Treemap: tile size = market value, tile colour = unrealized P&L %."""
     title = dict(
         text="Portfolio Map",
-        subtitle=dict(text="Sized by market value · coloured by unrealized P&L", font=dict(color=theme.MUTED, size=13)),
+        subtitle=dict(
+            text="Sized by market value · coloured by unrealized P&L",
+            font=dict(color=theme.MUTED, size=13),
+        ),
     )
     if df.empty or df["market_value_num"].sum() <= 0:
         fig = go.Figure()
-        fig.add_annotation(text="No holdings yet", showarrow=False, font=dict(color=theme.MUTED, size=15))
+        fig.add_annotation(
+            text="No holdings yet", showarrow=False, font=dict(color=theme.MUTED, size=15)
+        )
         fig.update_layout(title=title, xaxis={"visible": False}, yaxis={"visible": False})
         return fig
 
@@ -41,496 +47,601 @@ def make_portfolio_map(df):
     d["pnl_pct"] = (d["Total_Profit_Loss_num"] / cost * 100).where(cost > 0, 0.0)
     d = d.sort_values("market_value_num", ascending=False)
 
-    fig = go.Figure(go.Treemap(
-        labels=d["ticker"],
-        parents=[""] * len(d),
-        values=d["market_value_num"],
-        branchvalues="total",
-        text=[f"{v:+.0f}%" for v in d["pnl_pct"]],
-        texttemplate="<b>%{label}</b><br>%{text}",
-        textfont=dict(color=theme.TEXT_STRONG, size=14),
-        textposition="middle center",
-        customdata=d[["market_value_num", "weight_pct", "Total_Profit_Loss_num", "pnl_pct", "holding_type"]].values,
-        hovertemplate=(
-            "<b>%{label}</b> · %{customdata[4]}<br>"
-            "$%{customdata[0]:,.0f} · %{customdata[1]:.1f}% of portfolio<br>"
-            "P&L %{customdata[2]:+$,.0f} (%{customdata[3]:+.1f}%)"
-            "<extra></extra>"
-        ),
-        marker=dict(
-            colors=d["pnl_pct"],
-            colorscale=PNL_COLORSCALE,
-            cmin=-PNL_COLOR_LIMIT,
-            cmid=0,
-            cmax=PNL_COLOR_LIMIT,
-            line=dict(width=2, color="rgba(2, 6, 23, 0.9)"),
-            pad=dict(t=4, l=4, r=4, b=4),
-            showscale=True,
-            colorbar=dict(
-                orientation="h",
-                y=-0.02,
-                yanchor="top",
-                x=0.5,
-                thickness=8,
-                len=0.5,
-                ticksuffix="%",
-                tickvals=[-PNL_COLOR_LIMIT, 0, PNL_COLOR_LIMIT],
-                ticktext=[f"−{PNL_COLOR_LIMIT}%", "0%", f"+{PNL_COLOR_LIMIT}%"],
-                tickfont=dict(color=theme.MUTED, size=11),
-                outlinewidth=0,
+    fig = go.Figure(
+        go.Treemap(
+            labels=d["ticker"],
+            parents=[""] * len(d),
+            values=d["market_value_num"],
+            branchvalues="total",
+            text=[f"{v:+.0f}%" for v in d["pnl_pct"]],
+            texttemplate="<b>%{label}</b><br>%{text}",
+            textfont=dict(color=theme.TEXT_STRONG, size=14),
+            textposition="middle center",
+            customdata=d[
+                [
+                    "market_value_num",
+                    "weight_pct",
+                    "Total_Profit_Loss_num",
+                    "pnl_pct",
+                    "holding_type",
+                ]
+            ].values,
+            hovertemplate=(
+                "<b>%{label}</b> · %{customdata[4]}<br>"
+                "$%{customdata[0]:,.0f} · %{customdata[1]:.1f}% of portfolio<br>"
+                "P&L %{customdata[2]:+$,.0f} (%{customdata[3]:+.1f}%)"
+                "<extra></extra>"
             ),
-        ),
-        tiling=dict(pad=2),
-    ))
+            marker=dict(
+                colors=d["pnl_pct"],
+                colorscale=PNL_COLORSCALE,
+                cmin=-PNL_COLOR_LIMIT,
+                cmid=0,
+                cmax=PNL_COLOR_LIMIT,
+                line=dict(width=2, color="rgba(2, 6, 23, 0.9)"),
+                pad=dict(t=4, l=4, r=4, b=4),
+                showscale=True,
+                colorbar=dict(
+                    orientation="h",
+                    y=-0.02,
+                    yanchor="top",
+                    x=0.5,
+                    thickness=8,
+                    len=0.5,
+                    ticksuffix="%",
+                    tickvals=[-PNL_COLOR_LIMIT, 0, PNL_COLOR_LIMIT],
+                    ticktext=[f"−{PNL_COLOR_LIMIT}%", "0%", f"+{PNL_COLOR_LIMIT}%"],
+                    tickfont=dict(color=theme.MUTED, size=11),
+                    outlinewidth=0,
+                ),
+            ),
+            tiling=dict(pad=2),
+        )
+    )
     fig.update_layout(title=title, margin=dict(l=8, r=8, t=64, b=40))
     return fig
 
 
-
-
-
 def make_holding_type_chart(df):
-        if df.empty:
-            grouped = pd.DataFrame(
-                [{"holding_type": "No holdings", "market_value_num": 0.0, "percentage": 0.0}]
-            )
-            return px.bar(
-                grouped,
-                x="holding_type",
-                y="percentage",
-                title="Portfolio Allocation by Holding Type",
-                color="holding_type",
-            )
-
-        grouped = (
-            df.groupby("holding_type", as_index=False)["market_value_num"]
-            .sum()
+    if df.empty:
+        grouped = pd.DataFrame(
+            [{"holding_type": "No holdings", "market_value_num": 0.0, "percentage": 0.0}]
         )
-        total = grouped["market_value_num"].sum()
-        if total > 0:
-            grouped["percentage"] = grouped["market_value_num"] / total * 100
-        else:
-            grouped["percentage"] = 0.0
-        fig = px.bar(
+        return px.bar(
             grouped,
             x="holding_type",
             y="percentage",
+            title="Portfolio Allocation by Holding Type",
             color="holding_type",
-            color_discrete_map=theme.HOLDING_TYPE_COLORS,
-            custom_data=["market_value_num"],
-        )
-        fig.update_traces(
-            marker=dict(cornerradius=6, line=dict(width=0)),
-            texttemplate="%{y:.0f}%",
-            textposition="outside",
-            textfont=dict(color=theme.TEXT, size=13),
-            hovertemplate="<b>%{x}</b><br>%{y:.1f}% of portfolio · $%{customdata[0]:,.0f}<extra></extra>",
-            showlegend=False,
         )
 
-        targets = insights.ALLOCATION_TARGETS
+    grouped = df.groupby("holding_type", as_index=False)["market_value_num"].sum()
+    total = grouped["market_value_num"].sum()
+    if total > 0:
+        grouped["percentage"] = grouped["market_value_num"] / total * 100
+    else:
+        grouped["percentage"] = 0.0
+    fig = px.bar(
+        grouped,
+        x="holding_type",
+        y="percentage",
+        color="holding_type",
+        color_discrete_map=theme.HOLDING_TYPE_COLORS,
+        custom_data=["market_value_num"],
+    )
+    fig.update_traces(
+        marker=dict(cornerradius=6, line=dict(width=0)),
+        texttemplate="%{y:.0f}%",
+        textposition="outside",
+        textfont=dict(color=theme.TEXT, size=13),
+        hovertemplate="<b>%{x}</b><br>%{y:.1f}% of portfolio · $%{customdata[0]:,.0f}<extra></extra>",
+        showlegend=False,
+    )
 
-        # One short target line per category, drawn in category coordinates
-        # so it sits exactly over its bar regardless of chart width.
-        categories = list(targets.keys())
-        fig.update_xaxes(categoryorder="array", categoryarray=categories, title=None)
-        for i, name in enumerate(categories):
-            fig.add_shape(
-                type="line",
-                x0=i - 0.4, x1=i + 0.4, y0=targets[name], y1=targets[name],
-                xref="x", yref="y",
-                line=dict(color=theme.TEXT_STRONG, width=2, dash="dot"),
-            )
-        # legend entry for the target lines
-        fig.add_trace(go.Scatter(
-            x=[None], y=[None], mode="lines",
-            line=dict(color=theme.TEXT_STRONG, width=2, dash="dot"), name="Target"))
+    targets = get_settings()["targets"]
 
-        fig.update_traces(width=0.55, selector={"type": "bar"})
-        fig.update_layout(
-            barmode="overlay",
-            title=dict(
-                text="Allocation by Holding Type",
-                subtitle=dict(
-                    text="Current share vs "
-                    + " / ".join(f"{v}%" for v in targets.values())
-                    + " targets (dotted)",
-                    font=dict(color=theme.MUTED, size=13),
-                ),
+    # One short target line per category, drawn in category coordinates
+    # so it sits exactly over its bar regardless of chart width.
+    categories = list(targets.keys())
+    fig.update_xaxes(categoryorder="array", categoryarray=categories, title=None)
+    for i, name in enumerate(categories):
+        fig.add_shape(
+            type="line",
+            x0=i - 0.4,
+            x1=i + 0.4,
+            y0=targets[name],
+            y1=targets[name],
+            xref="x",
+            yref="y",
+            line=dict(color=theme.TEXT_STRONG, width=2, dash="dot"),
+        )
+    # legend entry for the target lines
+    fig.add_trace(
+        go.Scatter(
+            x=[None],
+            y=[None],
+            mode="lines",
+            line=dict(color=theme.TEXT_STRONG, width=2, dash="dot"),
+            name="Target",
+        )
+    )
+
+    fig.update_traces(width=0.55, selector={"type": "bar"})
+    fig.update_layout(
+        barmode="overlay",
+        title=dict(
+            text="Allocation by Holding Type",
+            subtitle=dict(
+                text="Current share vs "
+                + " / ".join(f"{v}%" for v in targets.values())
+                + " targets (dotted)",
+                font=dict(color=theme.MUTED, size=13),
             ),
-            legend=dict(title=None, orientation="h", x=1, xanchor="right", y=1.0, yanchor="bottom"),
-            margin=dict(t=88),
-        )
-        fig.update_yaxes(range=[0, 100], ticksuffix="%", tickformat=".0f", title=None)
-        return fig
+        ),
+        legend=dict(title=None, orientation="h", x=1, xanchor="right", y=1.0, yanchor="bottom"),
+        margin=dict(t=88),
+    )
+    fig.update_yaxes(range=[0, 100], ticksuffix="%", tickformat=".0f", title=None)
+    return fig
 
 
-def modify_portfolio(action, ticker, shares=None, avg_price=None, holding_type=None):
-    if not ticker:
-        raise ValueError("Ticker is required.")
-
-    ticker = ticker.strip().upper()
-    if not ticker:
-        raise ValueError("Ticker is required.")
-
-    if action not in {"add", "remove"}:
-        raise ValueError("Invalid action supplied.")
-
-    def _to_float(value, default=0.0):
-        try:
-            return float(value)
-        except (TypeError, ValueError):
-            return default
-
-    with sqlite3.connect(DB_PATH) as conn:
-        conn.row_factory = sqlite3.Row
-        existing_rows = conn.execute(
-            "SELECT rowid AS _rowid, * FROM portfolio WHERE ticker = ? ORDER BY rowid",
-            (ticker,),
-        ).fetchall()
-        existing = existing_rows[0] if existing_rows else None
-        existing_rowids = [row["_rowid"] for row in existing_rows]
-        primary_rowid = existing_rowids[0] if existing_rowids else None
-
-        def _existing_shares():
-            return sum(_to_float(row["shares"]) for row in existing_rows)
-
-        def _existing_avg_price():
-            total_shares = _existing_shares()
-            if total_shares <= 0:
-                return _to_float(existing["avg_price"]) if existing else 0.0
-
-            weighted_cost = sum(
-                _to_float(row["avg_price"]) * _to_float(row["shares"])
-                for row in existing_rows
-            )
-            return weighted_cost / total_shares
-
-        def _delete_duplicate_rows():
-            for duplicate_rowid in existing_rowids[1:]:
-                conn.execute("DELETE FROM portfolio WHERE rowid = ?", (duplicate_rowid,))
-
-        if action == "add":
-            if shares is None or avg_price is None or holding_type is None:
-                raise ValueError("Shares, average price, and holding type are required to add a ticker.")
-
-            shares = float(shares)
-            avg_price = float(avg_price)
-            current_shares = _existing_shares()
-            new_shares = current_shares + shares
-            if current_shares > 0:
-                existing_avg_price = _existing_avg_price()
-                avg_price = (
-                    (existing_avg_price * current_shares) + (avg_price * shares)
-                ) / new_shares
-
-            current_price = _to_float(existing["current_price"]) if existing else 0.0
-            price_basis = current_price if current_price else avg_price
-            market_value = price_basis * new_shares
-            total_profit_loss = (current_price - avg_price) * new_shares if current_price else 0.0
-            timestamp = pd.Timestamp.now().isoformat()
-
-            if existing:
-                conn.execute(
-                    """
-                    UPDATE portfolio
-                    SET shares = ?, avg_price = ?, market_value = ?,
-                        Total_Profit_Loss = ?, last_updated = ?, holding_type=?
-                    WHERE rowid = ?
-                    """,
-                    (new_shares, avg_price, market_value,total_profit_loss, timestamp, holding_type, primary_rowid),
-                )
-                _delete_duplicate_rows()
-            else:
-                conn.execute(
-                    """
-                    INSERT INTO portfolio (ticker, shares, avg_price, current_price,
-                    market_value, Total_Profit_Loss, holding_type, last_updated
-                                        )
-                     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                                                    """,
-                        (
-                            ticker,
-                            new_shares,
-                            avg_price,
-                            current_price,
-                            market_value,
-                            total_profit_loss,
-                            holding_type,
-                            timestamp,
-                        ),
-                    )
-
-        elif action == "remove":
-            if not existing:
-                raise ValueError("Ticker not found in portfolio.")
-            if shares is None:
-                raise ValueError("Shares are required when removing a ticker.")
-
-            current_shares = _existing_shares()
-            new_shares = current_shares - float(shares)
-
-            if new_shares <= 0:
-                conn.execute("DELETE FROM portfolio WHERE ticker = ?", (ticker,))
-            else:
-                avg_price_existing = _existing_avg_price()
-                current_price = _to_float(existing["current_price"])
-                price_basis = current_price if current_price else avg_price_existing
-                market_value = price_basis * new_shares
-                total_profit_loss = (
-                    (current_price - avg_price_existing) * new_shares if current_price else 0.0
-                )
-                timestamp = pd.Timestamp.now().isoformat()
-
-                conn.execute(
-                    """
-                    UPDATE portfolio
-                    SET shares = ?, market_value = ?, Total_Profit_Loss = ?, last_updated = ?
-                WHERE rowid = ?
-                                """,
-                        (
-                            new_shares,
-                            market_value,
-                            total_profit_loss,
-                            timestamp,
-                            primary_rowid,
-                        ),
-                                        )
-                _delete_duplicate_rows()
+def modify_portfolio(action, ticker, shares=None, avg_price=None, holding_type=None, fees=0):
+    return transact(
+        {"add": "buy", "remove": "sell"}.get(action, action),
+        ticker=ticker,
+        shares=shares,
+        price=avg_price,
+        holding_type=holding_type,
+        fees=fees,
+    )
 
 
 dash.register_page(__name__, path="/portfolio", name="Portfolio", title="Portfolio", order=1)
 
 TABLE_BORDER = "1px solid rgba(148, 163, 184, 0.14)"
 
-layout = html.Div([
-
-    html.Div([
-        html.Div("Overview", className="page-eyebrow"),
-        html.H2("Portfolio", className="page-title"),
-        html.P("Holdings, allocation and the headlines that move them.", className="page-subtitle"),
-    ], className="page-header"),
-
-    # Today's takeaways — what to look at first
-    html.Div([
-        html.Div([
-            html.H3("Today's takeaways", className="card-title"),
-            html.Div([
-                html.Span(id="takeaways-stamp", className="muted"),
-                html.Button("Generate takeaways", id="takeaways-btn", n_clicks=0),
-            ], className="toolbar"),
-        ], className="card-header"),
-        dcc.Loading(
-            html.Div(
-                html.Div(
-                    "Press Generate to analyse concentration, allocation drift, P&L outliers, "
-                    "correlated positions and the latest headline.",
-                    className="muted",
-                ),
-                id="takeaways-list",
-                className="takeaways",
-            ),
-            type="dot",
-            color=theme.ACCENT_BRIGHT,
-        ),
-    ], className="card"),
-
-    # Add / remove controls
-    html.Div([
-        html.Div("Manage holdings", className="card-title"),
-        html.Div([
-            dcc.Input(id="ticker-input", type="text", placeholder="Ticker (e.g. AAPL)"),
-            dcc.Input(id="shares-input", type="number", placeholder="Shares", min=1),
-            dcc.Input(id="avgprice-input", type="number", placeholder="Price", min=0),
-            #drop down for categorisation
-            dcc.Dropdown(
-                id="holding-type-input",
-                options=[
-                    {"label": "Core Holding", "value": "Core"},
-                    {"label": "High Conviction", "value": "High Conviction"},
-                    {"label": "Moonshot", "value": "Moonshot"},
-                ],
-                placeholder="Holding type",
-                clearable=False,
-            ),
-            html.Button("Add Ticker", id="add-btn", n_clicks=0),
-            html.Button("Remove Ticker", id="remove-btn", n_clicks=0, className="secondary"),
-        ], className="toolbar"),
-    ], className="card"),
-
-    # Holdings table
-    html.Div([
-        html.Div("Holdings", className="card-title"),
-        dash_table.DataTable(
-            id="portfolio-table",
-            columns=[{"name": i, "id": i, "type": "text"} for i in load_data().columns if i != "id"],
-            data=[],
-            style_table={"overflowX": "auto"},
-            style_cell={
-                "backgroundColor": "transparent",
-                "color": theme.TEXT,
-                "border": TABLE_BORDER,
-                "padding": "10px 12px",
-                "fontFamily": "Inter, Segoe UI, sans-serif",
-                "fontSize": "14px",
-                "textAlign": "left",
-            },
-            style_header={
-                "backgroundColor": "rgba(16, 185, 129, 0.14)",
-                "color": theme.TEXT_STRONG,
-                "fontWeight": "700",
-                "textTransform": "uppercase",
-                "fontSize": "12px",
-                "letterSpacing": "0.06em",
-                "border": TABLE_BORDER,
-            },
-            style_data_conditional=[
-                {"if": {"row_index": "odd"}, "backgroundColor": "rgba(148, 163, 184, 0.04)"},
-                {"if": {"column_id": "ticker"}, "color": theme.ACCENT_BRIGHT, "fontWeight": "700"},
-                {"if": {"column_id": "Total_Profit_Loss"}, "color": theme.POSITIVE, "fontWeight": "600"},
-                {
-                    "if": {"filter_query": "{Total_Profit_Loss} contains '-'", "column_id": "Total_Profit_Loss"},
-                    "color": theme.NEGATIVE,
-                },
-                {
-                    "if": {"filter_query": "{ticker} = 'TOTAL'"},
-                    "fontWeight": "700",
-                    "color": theme.TEXT_STRONG,
-                    "backgroundColor": "rgba(16, 185, 129, 0.08)",
-                    "borderTop": "1px solid rgba(52, 211, 153, 0.5)",
-                },
-            ],
-            css=[{"selector": ".dash-spreadsheet-inner *", "rule": "background: transparent !important;"}],
-        ),
-    ], className="card"),
-
-    # Charts
-    html.Div([
-        html.Div(dcc.Graph(id="value-chart"), className="card"),
-        html.Div(dcc.Graph(id="holding-type-chart"), className="card"),
-    ], className="section-grid two"),
-
-    # Rebalance actions — allocation drift turned into trades
-    html.Div([
-        html.Div([
-            html.H3("Rebalance actions", className="card-title"),
-            html.Span(
-                "Targets: " + " · ".join(f"{k} {v}%" for k, v in insights.ALLOCATION_TARGETS.items()),
-                className="muted",
-            ),
-        ], className="card-header"),
-        html.Div(id="rebalance-rows", className="rebalance"),
-    ], className="card"),
-
-    dcc.Interval(
-        id="interval-component",
-        interval=60 * 1000,
-        n_intervals=0,
-    ),
-
-    # Stock news section
-    html.Div([
+layout = html.Div(
+    [
         html.Div(
             [
-                html.H3("Stock News", className="card-title"),
-                html.Button("Refresh News", id="portfolio-news-btn", n_clicks=0, className="secondary"),
+                html.Div("Overview", className="page-eyebrow"),
+                html.H2("Portfolio", className="page-title"),
+                html.P(
+                    "Holdings, allocation and the headlines that move them.",
+                    className="page-subtitle",
+                ),
             ],
-            className="card-header",
+            className="page-header",
         ),
-        html.Div(id="portfolio-inline-news-status", className="muted", style={"marginBottom": "12px"}),
-        html.Div(id="portfolio-inline-news-feed", className="news-feed"),
-    ], className="card"),
-    dcc.Store(id="portfolio-inline-news-data"),
-])
+        html.Div(
+            [
+                metric_card(label, "summary-" + key)
+                for label, key in [
+                    ("Account value", "nav"),
+                    ("Invested holdings", "holdings"),
+                    ("Cash", "cash"),
+                    ("Unrealized P&L", "unrealized"),
+                    ("Realized P&L since opening", "realized"),
+                ]
+            ],
+            className="summary-grid",
+        ),
+        html.Div(id="portfolio-quote-status", className="data-status"),
+        # Today's takeaways — what to look at first
+        html.Div(
+            [
+                html.Div(
+                    [
+                        html.H3("Today's takeaways", className="card-title"),
+                        html.Div(
+                            [
+                                html.Span(id="takeaways-stamp", className="muted"),
+                                html.Button("Generate takeaways", id="takeaways-btn", n_clicks=0),
+                            ],
+                            className="toolbar",
+                        ),
+                    ],
+                    className="card-header",
+                ),
+                dcc.Loading(
+                    html.Div(
+                        html.Div(
+                            "Press Generate to analyse concentration, allocation drift, P&L outliers, "
+                            "correlated positions and the latest headline.",
+                            className="muted",
+                        ),
+                        id="takeaways-list",
+                        className="takeaways",
+                    ),
+                    type="dot",
+                    color=theme.ACCENT_BRIGHT,
+                ),
+            ],
+            className="card",
+        ),
+        # Add / remove controls
+        html.Div(
+            [
+                html.Div("Manage holdings", className="card-title"),
+                html.Div(
+                    [
+                        dcc.Input(id="ticker-input", type="text", placeholder="Ticker (e.g. AAPL)"),
+                        dcc.Input(
+                            id="shares-input",
+                            type="number",
+                            placeholder="Shares",
+                            min=0.000001,
+                            step="any",
+                        ),
+                        dcc.Input(
+                            id="avgprice-input",
+                            type="number",
+                            placeholder="Execution price",
+                            min=0.000001,
+                            step="any",
+                        ),
+                        # drop down for categorisation
+                        dcc.Dropdown(
+                            id="holding-type-input",
+                            options=[
+                                {"label": "Core Holding", "value": "Core"},
+                                {"label": "High Conviction", "value": "High Conviction"},
+                                {"label": "Moonshot", "value": "Moonshot"},
+                            ],
+                            placeholder="Holding type",
+                            clearable=False,
+                        ),
+                        dcc.Input(
+                            id="trade-fees",
+                            type="number",
+                            placeholder="Fees",
+                            min=0,
+                            value=0,
+                            step="any",
+                        ),
+                        html.Button("Record Buy", id="add-btn", n_clicks=0),
+                        html.Button(
+                            "Record Sell", id="remove-btn", n_clicks=0, className="secondary"
+                        ),
+                        html.Button(
+                            "Update type", id="type-btn", n_clicks=0, className="secondary"
+                        ),
+                        html.Button(
+                            "Refresh quotes",
+                            id="quote-refresh-btn",
+                            n_clicks=0,
+                            className="secondary",
+                        ),
+                    ],
+                    className="toolbar",
+                ),
+                html.P(
+                    "Record the execution price for buys and sells. Record available cash below before buying. Fractional shares are supported."
+                ),
+                html.Div(id="portfolio-action-status", role="status", **{"aria-live": "polite"}),
+            ],
+            className="card portfolio-controls",
+        ),
+        html.Div(
+            [
+                html.H3("Cash movements", className="card-title"),
+                html.P(
+                    "Opening cash is zero until you record your actual cash balance as a deposit. Past transactions are not inferred."
+                ),
+                html.Div(
+                    [
+                        dcc.Dropdown(
+                            id="cash-kind",
+                            options=[
+                                {"label": k.title(), "value": k}
+                                for k in ["deposit", "withdrawal", "dividend", "fee"]
+                            ],
+                            value="deposit",
+                            clearable=False,
+                        ),
+                        dcc.Input(
+                            id="cash-amount", type="number", placeholder="Amount", min=0, step="any"
+                        ),
+                        dcc.Input(
+                            id="cash-note", type="text", placeholder="Note / dividend ticker"
+                        ),
+                        html.Button("Record cash movement", id="cash-btn", n_clicks=0),
+                    ],
+                    className="toolbar",
+                ),
+            ],
+            className="card portfolio-controls",
+        ),
+        # Holdings table
+        html.Div(
+            [
+                html.Div("Holdings", className="card-title"),
+                dash_table.DataTable(
+                    id="portfolio-table",
+                    columns=[
+                        {
+                            "name": label,
+                            "id": key,
+                            "type": "numeric"
+                            if key
+                            in (
+                                "shares",
+                                "avg_price",
+                                "current_price",
+                                "market_value",
+                                "Total_Profit_Loss",
+                            )
+                            else "text",
+                            "format": {"specifier": ",.6~f" if key == "shares" else ",.2f"},
+                        }
+                        for key, label in [
+                            ("ticker", "Ticker"),
+                            ("shares", "Shares"),
+                            ("avg_price", "Average cost"),
+                            ("current_price", "Price"),
+                            ("market_value", "Market value"),
+                            ("Total_Profit_Loss", "Unrealized P&L"),
+                            ("holding_type", "Holding type"),
+                            ("quote_updated_at", "Quote time (UTC)"),
+                        ]
+                    ],
+                    sort_action="native",
+                    filter_action="native",
+                    page_size=20,
+                    data=[],
+                    style_table={"overflowX": "auto"},
+                    style_cell={
+                        "backgroundColor": "transparent",
+                        "color": theme.TEXT,
+                        "border": TABLE_BORDER,
+                        "padding": "10px 12px",
+                        "fontFamily": "Inter, Segoe UI, sans-serif",
+                        "fontSize": "14px",
+                        "textAlign": "left",
+                    },
+                    style_header={
+                        "backgroundColor": "rgba(16, 185, 129, 0.14)",
+                        "color": theme.TEXT_STRONG,
+                        "fontWeight": "700",
+                        "textTransform": "uppercase",
+                        "fontSize": "12px",
+                        "letterSpacing": "0.06em",
+                        "border": TABLE_BORDER,
+                    },
+                    style_data_conditional=[
+                        {
+                            "if": {"row_index": "odd"},
+                            "backgroundColor": "rgba(148, 163, 184, 0.04)",
+                        },
+                        {
+                            "if": {"column_id": "ticker"},
+                            "color": theme.ACCENT_BRIGHT,
+                            "fontWeight": "700",
+                        },
+                        {
+                            "if": {"column_id": "Total_Profit_Loss"},
+                            "color": theme.POSITIVE,
+                            "fontWeight": "600",
+                        },
+                        {
+                            "if": {
+                                "filter_query": "{Total_Profit_Loss} < 0",
+                                "column_id": "Total_Profit_Loss",
+                            },
+                            "color": theme.NEGATIVE,
+                        },
+                        {
+                            "if": {"filter_query": "{ticker} = 'TOTAL'"},
+                            "fontWeight": "700",
+                            "color": theme.TEXT_STRONG,
+                            "backgroundColor": "rgba(16, 185, 129, 0.08)",
+                            "borderTop": "1px solid rgba(52, 211, 153, 0.5)",
+                        },
+                    ],
+                    css=[
+                        {
+                            "selector": ".dash-spreadsheet-inner *",
+                            "rule": "background: transparent !important;",
+                        }
+                    ],
+                ),
+            ],
+            className="card",
+        ),
+        html.Details(
+            [
+                html.Summary("Transaction history"),
+                dash_table.DataTable(
+                    id="transaction-table",
+                    columns=[
+                        {
+                            "name": k.replace("_", " ").title(),
+                            "id": k,
+                            "type": "numeric"
+                            if k in ("shares", "price", "amount", "fees", "realized_pnl")
+                            else "text",
+                        }
+                        for k in [
+                            "timestamp",
+                            "kind",
+                            "ticker",
+                            "shares",
+                            "price",
+                            "amount",
+                            "fees",
+                            "realized_pnl",
+                            "note",
+                        ]
+                    ],
+                    data=[],
+                    sort_action="native",
+                    filter_action="native",
+                    page_size=15,
+                    style_table={"overflowX": "auto"},
+                    style_cell={
+                        "backgroundColor": "#111a2e",
+                        "color": theme.TEXT,
+                        "textAlign": "left",
+                    },
+                ),
+            ],
+            className="card",
+        ),
+        # Charts
+        html.Div(
+            [
+                html.Div(dcc.Graph(id="value-chart"), className="card"),
+                html.Div(dcc.Graph(id="holding-type-chart"), className="card"),
+            ],
+            className="section-grid two",
+        ),
+        # Rebalance actions — allocation drift turned into trades
+        html.Div(
+            [
+                html.Div(
+                    [
+                        html.H3("Rebalance actions", className="card-title"),
+                        html.Span(
+                            id="portfolio-target-label",
+                            className="muted",
+                        ),
+                    ],
+                    className="card-header",
+                ),
+                html.Div(id="rebalance-rows", className="rebalance"),
+            ],
+            className="card",
+        ),
+        dcc.Interval(
+            id="interval-component",
+            interval=60 * 1000,
+            n_intervals=0,
+        ),
+        # Stock news section
+        html.Div(
+            [
+                html.Div(
+                    [
+                        html.H3("Stock News", className="card-title"),
+                        html.Button(
+                            "Refresh News",
+                            id="portfolio-news-btn",
+                            n_clicks=0,
+                            className="secondary",
+                        ),
+                    ],
+                    className="card-header",
+                ),
+                html.Div(
+                    id="portfolio-inline-news-status",
+                    className="muted",
+                    style={"marginBottom": "12px"},
+                ),
+                html.Div(id="portfolio-inline-news-feed", className="news-feed"),
+            ],
+            className="card",
+        ),
+        dcc.Store(id="portfolio-inline-news-data"),
+    ]
+)
 
 
 @dash.callback(
     Output("portfolio-table", "data"),
     Output("value-chart", "figure"),
     Output("holding-type-chart", "figure"),
+    Output("portfolio-action-status", "children"),
+    Output("portfolio-quote-status", "children"),
+    *[
+        Output("summary-" + k, "children")
+        for k in ("nav", "holdings", "cash", "unrealized", "realized")
+    ],
+    Output("transaction-table", "data"),
+    Output("portfolio-target-label", "children"),
     Input("add-btn", "n_clicks"),
     Input("remove-btn", "n_clicks"),
+    Input("type-btn", "n_clicks"),
+    Input("quote-refresh-btn", "n_clicks"),
+    Input("cash-btn", "n_clicks"),
     Input("interval-component", "n_intervals"),
+    Input("settings-version", "data"),
     State("ticker-input", "value"),
     State("shares-input", "value"),
     State("avgprice-input", "value"),
     State("holding-type-input", "value"),
-
+    State("trade-fees", "value"),
+    State("cash-kind", "value"),
+    State("cash-amount", "value"),
+    State("cash-note", "value"),
 )
-def modify_data(add_clicks, remove_clicks, n_intervals, ticker, shares, avg_price, holding_type):
-    from dash import callback_context
-
-    ctx = callback_context
-    button_id = ctx.triggered[0]["prop_id"].split(".")[0] if ctx.triggered else ""
-
+def modify_data(
+    _add,
+    _sell,
+    _type,
+    _refresh,
+    _cash,
+    _interval,
+    _settings,
+    ticker,
+    shares,
+    price,
+    holding_type,
+    fees,
+    cash_kind,
+    cash_amount,
+    cash_note,
+):
+    trigger = dash.ctx.triggered_id
+    message = ""
     try:
-        if button_id == "add-btn" and ticker and shares is not None and avg_price is not None and holding_type is not None:
-            modify_portfolio("add", ticker, shares, avg_price,holding_type)
-        elif button_id == "remove-btn" and ticker and shares is not None:
-            modify_portfolio("remove", ticker, shares)
-    except ValueError:
-        pass
-
-    if button_id == "interval-component" and n_intervals:
-        try:
-            update_prices()
-        except Exception:
-            pass
-
+        if trigger in ("add-btn", "remove-btn"):
+            message = modify_portfolio(
+                "add" if trigger == "add-btn" else "remove",
+                ticker,
+                shares,
+                price,
+                holding_type,
+                fees,
+            )
+        elif trigger == "type-btn":
+            message = set_holding_type(ticker, holding_type)
+        elif trigger == "cash-btn":
+            message = transact(cash_kind, amount=cash_amount, note=cash_note)
+        elif trigger in ("quote-refresh-btn", "interval-component"):
+            message = update_prices(force=trigger == "quote-refresh-btn")
+    except (ValueError, sqlite3.Error) as exc:
+        message = f"Not saved: {exc}"
     df = load_data()
-    if df.empty:
-        table_df = pd.DataFrame(
-            [
-                {
-                    "id": "",
-                    "ticker": "TOTAL",
-                    "shares": "",
-                    "avg_price": "",
-                    "current_price": "",
-                    "market_value": "0",
-                    "last_updated": "",
-                    "Total_Profit_Loss": "0.00",
-                    "holding_type": "",
-                }
-            ]
-        )
-        return (
-            table_df[load_data().columns].to_dict("records"),
-            make_portfolio_map(pd.DataFrame(columns=["ticker", "market_value_num"])),
-            make_holding_type_chart(pd.DataFrame(columns=["holding_type", "market_value_num"])),
-        )
-
-    df["market_value_num"] = pd.to_numeric(df["market_value"], errors="coerce").fillna(0)
-    df["shares_num"] = pd.to_numeric(df["shares"], errors="coerce").fillna(0)
-    df["avg_price_num"] = pd.to_numeric(df["avg_price"], errors="coerce").fillna(0)
-    df["current_price"] = pd.to_numeric(df["current_price"], errors="coerce").fillna(0)
-    df["Total_Profit_Loss_num"] = pd.to_numeric(df["Total_Profit_Loss"], errors="coerce").fillna(0)
-    if "holding_type" not in df.columns:
-        df["holding_type"] = ""
-    df["holding_type"] = df["holding_type"].fillna("Unassigned")
-    df["shares"] = df["shares_num"].apply(lambda x: f"{x:,.0f}" if x.is_integer() else f"{x:,.4f}")
-    df["avg_price"] = df["avg_price_num"].apply(lambda x: f"{x:,.2f}")
-    df["current_price"] = df["current_price"].apply(lambda x: f"{x:,.2f}")
-    df["market_value"] = df["market_value_num"].apply(lambda x: f"{x:,.0f}")
-    df["Total_Profit_Loss"] = df["Total_Profit_Loss_num"].apply(lambda x: f"{x:,.2f}")
-    last_row = pd.DataFrame([{
-        "id": "",
-        "ticker": "TOTAL",
-        "shares": "",
-        "avg_price": "",
-        "current_price": "",
-        "market_value": f"{df['market_value_num'].sum():,.0f}",
-        "last_updated": "",
-        "Total_Profit_Loss": f"{df['Total_Profit_Loss_num'].sum():,.0f}",
-        "holding_type": ""
-    }])
-    df= df[df["ticker"] != "TOTAL"]
-    df = pd.concat([df, last_row], ignore_index=True)
-    df_chart = df[df["ticker"] != "TOTAL"]
-    chart_fig = make_portfolio_map(df_chart)
-    holding_fig= make_holding_type_chart(df_chart)
-    table_data = df.to_dict("records")
-    return table_data, chart_fig, holding_fig
+    chart = insights.prepare_holdings(df).rename(
+        columns={
+            "market_value": "market_value_num",
+            "shares": "shares_num",
+            "avg_price": "avg_price_num",
+            "Total_Profit_Loss": "Total_Profit_Loss_num",
+        }
+    )
+    summary = account_summary()
+    stamps = pd.to_datetime(df.quote_updated_at, utc=True, errors="coerce")
+    stale = df.loc[
+        stamps.isna() | ((pd.Timestamp.now(tz="UTC") - stamps) > pd.Timedelta(minutes=15)), "ticker"
+    ].tolist()
+    status = "Quote timestamps are market observation times, not edit times. "
+    status += (
+        ("Older than 15 minutes or unverified: " + ", ".join(stale) + ". Markets may be closed.")
+        if stale
+        else "All quotes are within 15 minutes."
+    )
+    targets = get_settings()["targets"]
+    return (
+        df.to_dict("records"),
+        make_portfolio_map(chart),
+        make_holding_type_chart(chart),
+        message,
+        status,
+        *[f"${summary[k]:,.2f}" for k in ("nav", "holdings", "cash", "unrealized", "realized")],
+        transaction_history().to_dict("records"),
+        "Targets: " + " / ".join(f"{k} {v:g}%" for k, v in targets.items()),
+    )
 
 
 if not hasattr(dash, "_portfolio_inline_news_registered"):
@@ -574,7 +685,10 @@ if not hasattr(dash, "_portfolio_inline_news_registered"):
                 html.Div(
                     [
                         html.Span(article["ticker"], className="news-ticker"),
-                        html.Span(label, className=f"news-impact news-impact-{label.lower().replace(' ', '-')}"),
+                        html.Span(
+                            label,
+                            className=f"news-impact news-impact-{label.lower().replace(' ', '-')}",
+                        ),
                     ],
                     className="news-card-topline",
                 ),
@@ -591,7 +705,13 @@ if not hasattr(dash, "_portfolio_inline_news_registered"):
                 ),
                 html.P(article.get("description") or "", className="news-description"),
                 html.Div(
-                    html.A("Read →", href=article["url"], target="_blank", rel="noreferrer", className="news-action"),
+                    html.A(
+                        "Read →",
+                        href=article["url"],
+                        target="_blank",
+                        rel="noreferrer",
+                        className="news-action",
+                    ),
                     className="news-card-footer",
                 ),
             ],
@@ -607,9 +727,7 @@ if not hasattr(dash, "_portfolio_inline_news_registered"):
         holdings = load_data()
         if holdings.empty:
             return [], "No holdings found."
-        tickers = (
-            holdings["ticker"].dropna().astype(str).str.strip().str.upper().tolist()
-        )
+        tickers = holdings["ticker"].dropna().astype(str).str.strip().str.upper().tolist()
         tickers = [t for t in tickers if t]
         if not tickers:
             return [], "No holdings found."
@@ -633,8 +751,14 @@ if not hasattr(dash, "_portfolio_inline_news_registered"):
                 html.Div(row["bucket"], className="rebalance-bucket"),
                 html.Div(
                     [
-                        html.Div(className=f"rebalance-bar-fill {row['status']}", style={"width": fill_width}),
-                        html.Div(className="rebalance-bar-target", style={"left": f"{row['target_pct']}%"}),
+                        html.Div(
+                            className=f"rebalance-bar-fill {row['status']}",
+                            style={"width": fill_width},
+                        ),
+                        html.Div(
+                            className="rebalance-bar-target",
+                            style={"left": f"{row['target_pct']}%"},
+                        ),
                     ],
                     className="rebalance-bar",
                 ),
@@ -659,11 +783,19 @@ if not hasattr(dash, "_portfolio_inline_news_registered"):
     def _correlated_pairs_cached(tickers):
         key = tuple(sorted(set(tickers)))
         now = datetime.now(timezone.utc)
-        if _corr_cache["key"] == key and _corr_cache["at"] and now - _corr_cache["at"] < timedelta(minutes=15):
+        if (
+            _corr_cache["key"] == key
+            and _corr_cache["at"]
+            and now - _corr_cache["at"] < timedelta(minutes=15)
+        ):
             return _corr_cache["pairs"]
         try:
             prices = get_historical_prices(list(key), period="6mo")
-            pairs = insights.correlated_pairs(prices.pct_change().dropna()) if not prices.empty else []
+            pairs = (
+                insights.correlated_pairs(prices.pct_change(fill_method=None).dropna())
+                if not prices.empty
+                else []
+            )
         except Exception:
             pairs = []
         _corr_cache.update(key=key, pairs=pairs, at=now)
@@ -699,7 +831,9 @@ if not hasattr(dash, "_portfolio_inline_news_registered"):
         pairs = _correlated_pairs_cached(tickers) if tickers else []
         headline = _top_headline(tickers) if tickers else None
         items = insights.takeaways(holdings, rows, pairs, headline)
-        return [_takeaway(level, text) for level, text in items], f"Generated {datetime.now():%H:%M}"
+        return [
+            _takeaway(level, text) for level, text in items
+        ], f"Generated {datetime.now():%H:%M}"
 
     @dash.callback(
         Output("portfolio-inline-news-feed", "children"),

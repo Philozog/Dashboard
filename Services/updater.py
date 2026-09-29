@@ -1,64 +1,75 @@
-import yfinance as yf
+"""Batch quotes outside the write transaction; keep quote timestamps distinct."""
+
+import logging
+
+import numpy as np
 import pandas as pd
-from sqlalchemy import text
-from datetime import datetime
+import yfinance as yf
 
-from Services.database import get_engine
+from Services.database import connect
+from Services.helper import load_data
+from Services.ledger import record_valuation
+
+LOG = logging.getLogger(__name__)
 
 
-# DATA from YAHOO FINANCE
-# Connect to your existing database
-# KEEP Dashboard Current and LIVE
-engine = get_engine()
-
-def update_prices():
-    df = pd.read_sql("SELECT * FROM portfolio", engine)
-
-    with engine.begin() as conn:
-        for _, row in df.iterrows():
-            ticker = str(row.get("ticker", "")).strip().upper()
-            if not ticker:
+def update_prices(force=False):
+    holdings = load_data()
+    if holdings.empty:
+        return "No holdings to refresh."
+    now = pd.Timestamp.now(tz="UTC")
+    stamps = pd.to_datetime(holdings.quote_checked_at, utc=True, errors="coerce")
+    stale = (
+        holdings if force else holdings[(now - stamps > pd.Timedelta(minutes=15)) | stamps.isna()]
+    )
+    tickers = stale.ticker.tolist()
+    if not tickers:
+        return "Quotes were checked within the last 15 minutes."
+    try:
+        data = yf.download(
+            tickers=tickers,
+            period="5d",
+            interval="1m",
+            auto_adjust=False,
+            progress=False,
+            threads=False,
+            group_by="column",
+        )
+    except Exception as exc:
+        LOG.exception("Quote refresh failed")
+        return f"Quote refresh failed; previous prices retained ({type(exc).__name__})."
+    quotes = {}
+    if data is not None and not data.empty:
+        closes = data["Close"] if "Close" in data else pd.DataFrame()
+        if isinstance(closes, pd.Series):
+            closes = closes.to_frame(tickers[0])
+        for ticker in tickers:
+            if ticker not in closes:
                 continue
-
-            if pd.notna(row["current_price"]) and pd.notna(row["last_updated"]):
-                age = (datetime.now() - pd.to_datetime(row["last_updated"])).total_seconds()
-                if age < 900:
-                    continue
-
-            try:
-                data = yf.Ticker(ticker).history(period="1d")
-            except Exception:
-                continue
-            if data.empty:
-                continue
-
-            price = round(data["Close"].iloc[-1], 2)
-
+            series = closes[ticker].replace([np.inf, -np.inf], np.nan).dropna()
+            series = series[series > 0]
+            if not series.empty:
+                stamp = pd.Timestamp(series.index[-1])
+                stamp = (
+                    stamp.tz_localize("UTC") if stamp.tzinfo is None else stamp.tz_convert("UTC")
+                )
+                quotes[ticker] = (float(series.iloc[-1]), stamp.isoformat())
+    with connect() as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        for ticker in tickers:
             conn.execute(
-                text(
-                    """
-                    UPDATE portfolio
-                    SET
-                        current_price = :price,
-                        market_value = :market_value,
-                        Total_Profit_Loss = :pnl,
-                        last_updated = :last_updated
-                    WHERE ticker = :ticker
-                    """
-                ),
-                {
-                    "price": price,
-                    "market_value": price * row["shares"],
-                    "pnl": (price - row["avg_price"]) * row["shares"],
-                    "last_updated": datetime.now(),
-                    "ticker": ticker,
-                },
+                "UPDATE portfolio SET quote_updated_at=CASE WHEN quote_checked_at IS NULL THEN NULL ELSE quote_updated_at END, quote_checked_at=? WHERE ticker=?",
+                (now.isoformat(), ticker),
             )
-       
-
- 
-
-if __name__ == "__main__":
-    print("Fetching new prices from Yahoo Finance...")
-    update_prices()
-    print("✅ All prices updated successfully!")
+        if quotes:
+            for ticker, (price, stamp) in quotes.items():
+                # Derive values from the current row: a concurrent trade cannot be overwritten.
+                conn.execute(
+                    "UPDATE portfolio SET current_price=?,market_value=?*shares,Total_Profit_Loss=(?-avg_price)*shares,quote_updated_at=? WHERE ticker=?",
+                    (price, price, price, stamp, ticker),
+                )
+            record_valuation(conn)
+    missing = sorted(set(tickers) - set(quotes))
+    return f"Refreshed {len(quotes)} quotes." + (
+        f" No quote returned for {', '.join(missing)}; previous values retained." if missing else ""
+    )
