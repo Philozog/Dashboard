@@ -65,11 +65,10 @@ def main():
             artifacts.mkdir(exist_ok=True)
             try:
                 page.goto(base + "/portfolio")
+                expect(page.get_by_role("link", name="News", exact=True)).to_have_count(0)
                 expect(page.locator("#summary-cash")).to_have_text("$7,500.00")
                 page.locator("#holding-type-input").click()
-                option = page.locator("#holding-type-input .VirtualizedSelectOption").filter(
-                    has_text="High Conviction"
-                )
+                option = page.get_by_role("option", name="High Conviction", exact=True)
                 expect(option).to_be_visible()
                 assert option.evaluate(
                     "el => { const r = el.getBoundingClientRect(); return el.contains(document.elementFromPoint(r.x+r.width/2, r.y+r.height/2)); }"
@@ -91,11 +90,13 @@ def main():
                     "value coverage: 100.0%", timeout=30000
                 )
                 expect(page.locator("#alpha")).not_to_have_text("N/A")
+                expect(page.locator("#account-performance-chart")).to_have_count(0)
+                expect(page.locator(".nav-link.active")).to_have_attribute("href", "/analytics")
                 page.screenshot(path=str(artifacts / "analytics-desktop.png"), full_page=True)
-                page.goto(base + "/covariance")
-                expect(page.locator("#scenario-results")).to_contain_text(
-                    "Market scenario:", timeout=30000
-                )
+                page.get_by_role("link", name="Correlations").click()
+                expect(page).to_have_url(base + "/covariance")
+                expect(page.locator(".nav-link.active")).to_have_attribute("href", "/covariance")
+                expect(page.locator("#scenario-results")).to_have_count(0)
                 page.goto(base + "/monte-carlo")
                 expect(page.locator("#mc-status")).to_contain_text(
                     "value coverage: 100.0%", timeout=60000
@@ -117,11 +118,7 @@ def main():
                     "Mobile page overflows horizontally"
                 )
                 page.locator("#holding-type-input").click()
-                expect(
-                    page.locator("#holding-type-input .VirtualizedSelectOption").filter(
-                        has_text="Moonshot"
-                    )
-                ).to_be_visible()
+                expect(page.get_by_role("option", name="Moonshot", exact=True)).to_be_visible()
                 page.screenshot(path=str(artifacts / "portfolio-mobile.png"), full_page=True)
                 assert not errors, errors
                 print(

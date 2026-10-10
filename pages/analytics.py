@@ -6,7 +6,6 @@ from dash import Input, Output, dcc, html
 
 from Services.components import metric_card as _metric_card
 from Services.helper import load_data
-from Services.ledger import account_performance
 from Services.market import clean_returns, coverage_text, get_historical_prices
 from Services.performance import (
     compute_performance_metrics,
@@ -38,14 +37,11 @@ layout = html.Div(
         ),
         html.P(
             "Historical model of today's invested holdings, rebalanced daily; cash is excluded. "
-            "It is separate from recorded account performance below. Returns use adjusted prices and matching dates."
+                "Returns use adjusted prices and matching dates."
         ),
         html.Div(id="analytics-status", className="data-status"),
         dcc.Graph(id="performance_chart"),
         dcc.Graph(id="drawdown_chart"),
-        html.H3("Recorded account performance"),
-        html.Div(id="account-performance-status"),
-        dcc.Graph(id="account-performance-chart"),
     ]
 )
 
@@ -129,31 +125,3 @@ def update_analytics(pathname, period="1y", benchmark="SPY", _version=None):
         fmt(metrics["max_drawdown"], True),
         status,
     )
-
-
-@dash.callback(
-    Output("account-performance-status", "children"),
-    Output("account-performance-chart", "figure"),
-    Input("analytics_location", "pathname"),
-)
-def recorded_performance(_pathname):
-    values = account_performance()
-    if len(values) < 2:
-        return (
-            "Account history starts with the opening balance. More recorded valuations are needed.",
-            px.line(),
-        )
-    values["timestamp"] = pd.to_datetime(values.timestamp, utc=True)
-    values["Time-weighted return"] = values.growth - 1
-    fig = px.line(
-        values,
-        x="timestamp",
-        y="Time-weighted return",
-        title="Recorded account return (cash flows excluded)",
-    )
-    fig.update_yaxes(tickformat=".1%")
-    return (
-        f"Since {values.timestamp.iloc[0]:%Y-%m-%d}: {values.growth.iloc[-1] - 1:.2%}. "
-        "Uses recorded quote and transaction valuations, including cash, dividends and fees. "
-        "No performance is reconstructed before the opening balance; stale quotes can affect valuations."
-    ), fig

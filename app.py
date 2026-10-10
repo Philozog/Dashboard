@@ -1,3 +1,5 @@
+import json
+
 import dash
 from dash import Dash, Input, Output, dcc, html
 from dotenv import load_dotenv
@@ -18,6 +20,9 @@ app = Dash(
     suppress_callback_exceptions=True,
     title="Apothicaire",
 )
+nav_pages = [
+    page for page in dash.page_registry.values() if page["path"] != "/portfolio-news"
+]
 
 app.layout = html.Div(
     [
@@ -29,8 +34,13 @@ app.layout = html.Div(
                 # Navigation Bar
                 html.Div(
                     [
-                        dcc.Link(page["name"], href=page["path"], className="nav-link")
-                        for page in dash.page_registry.values()
+                        dcc.Link(
+                            page["name"],
+                            href=page["path"],
+                            className="nav-link",
+                            id=f"nav-link-{index}",
+                        )
+                        for index, page in enumerate(nav_pages)
                     ],
                     className="navbar",
                 ),
@@ -89,6 +99,15 @@ app.layout = html.Div(
 app.clientside_callback(
     "function(path) { return path === '/' ? 'app-header is-cover' : 'app-header'; }",
     Output("app-header", "className"),
+    Input("url", "pathname"),
+)
+
+app.clientside_callback(
+    f"""function(path) {{
+        const paths = {json.dumps([page["path"] for page in nav_pages])};
+        return paths.map(linkPath => path === linkPath ? 'nav-link active' : 'nav-link');
+    }}""",
+    [Output(f"nav-link-{index}", "className") for index in range(len(nav_pages))],
     Input("url", "pathname"),
 )
 
